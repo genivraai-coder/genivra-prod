@@ -1,0 +1,59 @@
+paths:
+  data_raw: "data/raw"
+  data_processed: "data/processed"
+  features: "features"
+  models: "models/saved_models"
+  evaluation: "evaluation"
+  notebooks: "notebooks"
+  docs: "docs"
+  logs: "logs"
+
+# Model hyperparameters
+model:
+  type: "xgboost"  # can switch to "random_forest", "lightgbm", "mlp"
+  n_estimators: 500
+  max_depth: 6
+  learning_rate: 0.01
+  subsample: 0.8
+  colsample_bytree: 0.8
+  random_state: 42
+
+# Training parameters
+training:
+  batch_size: 64
+  epochs: 100
+  validation_split: 0.2
+  early_stopping: true
+  early_stopping_patience: 10
+  shuffle: true
+
+# Feature options
+features:
+  include_biomarkers: true
+  include_clinical: true
+  include_genetics: true
+  scale_numeric: true
+  encode_categorical: true
+  missing_value_strategy: "median"  # options: mean, median, drop
+
+# Evaluation metrics
+evaluation:
+  metrics:
+    - accuracy
+    - roc_auc
+    - log_loss
+    - brier_score
+    - calibration_curve
+
+# Scoring rules (example, for simulated trial scoring engine)
+scoring:
+  biomarker_stratification_present: 15
+  only_subjective_endpoints: -20
+  no_blood_biomarkers: -10
+  trial_duration_ge_18_months: 6
+  safety_monitoring_plan: 8
+
+# Logging
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
