@@ -1,0 +1,50 @@
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv/
+.python-version
+
+# Jupyter Notebooks
+.ipynb_checkpoints/
+
+# VS Code
+.vscode/
+
+# Logs
+*.log
+logs/
+logging_config.yaml
+
+# Data files
+data/
+outputs/
+*.csv
+*.h5
+*.pkl
+*.joblib
+
+# Models
+models/*.pt
+models/*.pth
+
+# MacOS
+.DS_Store
+
+# Pytest cache
+.pytest_cache/
+
+# Coverage reports
+htmlcov/
+.coverage
+coverage.xml
+
+# Config and temp files
+*.tmp
+*.bak
+*.swp
