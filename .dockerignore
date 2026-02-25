@@ -1,0 +1,74 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+.Python
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+.hypothesis/
+.pytest_cache/
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Testing
+test_output.txt
+htmlcov/
+.mypy_cache/
+
+# Temporary files
+*.tmp
+*.temp
+*.log
+logs/
+
+# Documentation
+docs/_build/
+*.md  # Exclude markdown files if desired
+
+# CI/CD
+.github/
+.gitlab-ci.yml
+
+# OS
+Thumbs.db
+.DS_Store
+
+# Node dependencies (if frontend build needed)
+node_modules/
+npm-debug.log
+
+# Miscellaneous
+*.bak
+*.swp
+.env
+.env.local
+
+# Large files
+*.tar.gz
+*.zip
+*.dump

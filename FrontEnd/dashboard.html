@@ -1,0 +1,1454 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Genivra Dashboard</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/normalize/8.0.1/normalize.min.css" integrity="" crossorigin="anonymous" />
+  <style>
+    :root{--gap:16px;--panel-bg:#fff;--muted:#666}
+    body{font-family:Inter,Segoe UI,Arial,sans-serif;background:#f5f7fa;margin:0;padding:20px;color:#222}
+    .wrap{max-width:1200px;margin:0 auto;display:flex;flex-direction:column;gap:var(--gap)}
+    header{display:flex;justify-content:space-between;align-items:center}
+    h1{font-size:1.25rem;margin:0}
+    .controls{display:flex;gap:8px;align-items:center}
+    .panel{background:var(--panel-bg);padding:12px;border-radius:8px;box-shadow:0 1px 3px rgba(10,10,10,0.04)}
+    .layout{display:flex;gap:var(--gap);align-items:flex-start}
+    .left{flex:1;min-width:320px}
+    .right{flex:2;display:flex;flex-direction:column;gap:var(--gap)}
+    table{width:100%;border-collapse:collapse;font-size:0.9rem}
+    th,td{padding:8px;border-bottom:1px solid #eee;text-align:left}
+    th{font-weight:600;background:#fafbfc}
+    .chart{min-height:220px}
+    .small{font-size:0.85rem;color:var(--muted)}
+    @media (max-width: 900px){.layout{flex-direction:column}.right{order:2}.left{order:1}}
+    .btn{padding:8px 10px;border-radius:6px;border:1px solid #cbd5e1;background:#fff;cursor:pointer}
+    .btn-primary{background:#0b79ff;color:#fff;border-color:#0b79ff}
+  </style>
+  <script src="https://cdn.plot.ly/plotly-2.24.2.min.js"></script>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <h1>Genivra Predictions Dashboard</h1>
+      <div class="controls">
+        <input id="fileInput" type="file" accept=".csv" />
+        <button id="loadApiBtn" class="btn">Load from API</button>
+        <button id="refreshBtn" class="btn">Refresh Charts</button>
+      </div>
+    </header>
+
+    <div class="layout">
+      <section class="left panel">
+        <h3>Summary</h3>
+        <p class="small">Table of processed trials. You can upload a results CSV (from the upload tool) or fetch from the API.</p>
+        <div style="overflow:auto;max-height:520px;">
+          <table id="summaryTable">
+            <thead>
+              <tr><th>#</th><th>Probability</th><th>Risk Tier</th><th>Top Drivers</th><th>Confidence</th></tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+      </section>
+
+      <aside class="right">
+        <div class="panel">
+          <h3>Top Drivers (Bar)</h3>
+          <div id="barDrivers" class="chart"></div>
+        </div>
+
+        <div class="panel" style="display:flex;gap:var(--gap);flex-wrap:wrap">
+          <div style="flex:1;min-width:260px">
+            <h3>Risk Tier Heatmap</h3>
+            <div id="heatmap" class="chart"></div>
+          </div>
+          <div style="flex:1;min-width:260px">
+            <h3>Probability Trend</h3>
+            <div id="trend" class="chart"></div>
+          </div>
+        </div>
+      </aside>
+    </div>
+  </div>
+
+  <script>
+    // Basic dashboard: expects results with fields: probability_of_success, risk_tier, top_drivers, confidence_flag
+    const fileInput = document.getElementById('fileInput');
+    const loadApiBtn = document.getElementById('loadApiBtn');
+    const refreshBtn = document.getElementById('refreshBtn');
+    const summaryTbody = document.querySelector('#summaryTable tbody');
+
+    let dataRows = [];
+
+    function parseCSV(text) {
+      const lines = text.trim().split(/\r?\n/).filter(Boolean);
+      if (!lines.length) return [];
+      const headers = lines[0].split(',').map(h => h.trim());
+      const rows = [];
+      for (let i=1;i<lines.length;i++){
+        const parts = lines[i].split(',');
+        const obj = {};
+        for (let j=0;j<headers.length;j++) obj[headers[j]] = (parts[j] || '').trim();
+        rows.push(obj);
+      }
+      return rows;
+    }
+
+    function normalizeRow(r){
+      // Ensure numeric probability
+      const prob = r.probability_of_success!==undefined && r.probability_of_success!=='' ? Number(r.probability_of_success) : null;
+      const drivers = r.top_drivers ? String(r.top_drivers) : '';
+      const topDriversArr = drivers.split(';').map(s=>s.trim()).filter(Boolean).map(token=>{
+        // try to extract feature and optional score
+        const parts = token.split(':');
+        return { feature: parts[0].trim(), score: parts[1] ? Number(parts[1].trim()) : null };
+      });
+      return {
+        probability: prob,
+        risk_tier: r.risk_tier || r.risk || 'Unknown',
+        top_drivers: topDriversArr,
+        confidence: r.confidence_flag || r.confidence || ''
+      };
+    }
+
+    function renderTable(rows){
+      summaryTbody.innerHTML = '';
+      rows.forEach((r,i)=>{
+        const tr = document.createElement('tr');
+        const prob = r.probability !== null && r.probability !== undefined ? Number(r.probability).toFixed(3) : '';
+        const drivers = (r.top_drivers || []).map(d=>d.feature).join('; ');
+        tr.innerHTML = `<td>${i+1}</td><td>${prob}</td><td>${r.risk_tier}</td><td>${drivers}</td><td>${r.confidence}</td>`;
+        summaryTbody.appendChild(tr);
+      });
+    }
+
+    function aggregateTopDrivers(rows, topN=10){
+      const map = new Map();
+      rows.forEach(r=>{
+        (r.top_drivers||[]).forEach(d=>{
+          const key = d.feature || 'unknown';
+          const prev = map.get(key) || {count:0,scoreSum:0,scoreCount:0};
+          prev.count += 1;
+          if (d.score!=null && !isNaN(d.score)){ prev.scoreSum += d.score; prev.scoreCount += 1; }
+          map.set(key, prev);
+        });
+      });
+      const arr = Array.from(map.entries()).map(([k,v])=>({feature:k, count:v.count, avgScore: v.scoreCount? v.scoreSum/v.scoreCount : null}));
+      arr.sort((a,b)=>b.count - a.count);
+      return arr.slice(0, topN);
+    }
+
+    function renderBarDrivers(rows){
+      const agg = aggregateTopDrivers(rows, 12);
+      const x = agg.map(a=>a.feature);
+      const y = agg.map(a=>a.count);
+      const trace = { x, y, type: 'bar', marker:{color:'#0b79ff'} };
+      Plotly.newPlot('barDrivers', [trace], {margin:{t:20,l:40,r:20,b:50},height:300});
+    }
+
+    function renderTrend(rows){
+      const idx = rows.map((r,i)=>i+1);
+      const probs = rows.map(r=>r.probability!=null ? r.probability : null);
+      const trace = { x: idx, y: probs, mode:'lines+markers', line:{color:'#ff7f0e'} };
+      Plotly.newPlot('trend', [trace], {margin:{t:20,l:40,r:20,b:50},height:260});
+    }
+
+    function renderHeatmap(rows){
+      // Build matrix of counts risk_tier x confidence
+      const tiers = Array.from(new Set(rows.map(r=>r.risk_tier || 'Unknown'))).sort();
+      const confs = Array.from(new Set(rows.map(r=>r.confidence || ''))).sort();
+      const z = tiers.map(t=>confs.map(c=> rows.filter(r=>r.risk_tier===t && (r.confidence||'')===c).length ));
+      const trace = { z, x: confs, y: tiers, type:'heatmap', colorscale:'YlOrRd' };
+      Plotly.newPlot('heatmap', [trace], {margin:{t:20,l:80,r:20,b:80},height:300});
+    }
+
+    function updateCharts(){
+      const norm = dataRows.map(normalizeRow);
+      renderTable(norm);
+      renderBarDrivers(norm);
+      renderTrend(norm);
+      renderHeatmap(norm);
+    }
+
+    fileInput.addEventListener('change', async (e)=>{
+      const f = e.target.files[0];
+      if (!f) return;
+      if (!f.name.toLowerCase().endsWith('.csv')){ alert('Please upload a CSV file'); return; }
+      const txt = await f.text();
+      const parsed = parseCSV(txt);
+      // Accept files that contain prediction columns (probability_of_success etc.) or raw inputs
+      dataRows = parsed;
+      updateCharts();
+    });
+
+    loadApiBtn.addEventListener('click', async ()=>{
+      setLoading(true);
+      try {
+        // Try a few common endpoints; graceful fallback
+        const endpoints = ['/predictions','/predict_results','/results','/api/predictions','/predict_batch'];
+        let resJson = null;
+        for (const ep of endpoints){
+          try {
+            const resp = await fetch(ep);
+            if (!resp.ok) continue;
+            const j = await resp.json();
+            if (Array.isArray(j)) { resJson = j; break; }
+            if (j && j.results) { resJson = j.results; break; }
+          } catch(e) { /* ignore and try next */ }
+        }
+        if (!resJson) { alert('No API results found or endpoint unavailable.'); return; }
+        dataRows = resJson;
+        updateCharts();
+      } finally { setLoading(false); }
+    });
+
+    refreshBtn.addEventListener('click', ()=>{ if (dataRows.length) updateCharts(); });
+
+    function setLoading(flag){ loadApiBtn.disabled = flag; refreshBtn.disabled = flag; fileInput.disabled = flag; }
+
+    // Small demo: try to load window.lastResults if available from upload page
+    document.addEventListener('DOMContentLoaded', ()=>{
+      try { if (window.opener && window.opener.lastResults){ dataRows = window.opener.lastResults; updateCharts(); } else if (window.lastResults){ dataRows = window.lastResults; updateCharts(); } } catch(e){}
+    });
+  </script>
+</body>
+</html>
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Genivra Dashboard - Trial Risk Prediction</title>
+    <style>
+        /* ========== CSS RESET ========== */
+        *, *::before, *::after {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #1a1a2e;
+            --bg-card: #2d2d44;
+            --text-primary: #ffffff;
+            --text-secondary: #b0b0c0;
+            --accent: #00d4ff;
+            --accent-purple: #8b5cf6;
+            --success: #10b981;
+            --warning: #f59e0b;
+            --danger: #ef4444;
+            --border: rgba(255, 255, 255, 0.1);
+        }
+
+        html {
+            scroll-behavior: smooth;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+            color: var(--text-primary);
+            line-height: 1.6;
+            min-height: 100vh;
+        }
+
+        /* ========== HEADER ========== */
+        header {
+            background: rgba(10, 10, 15, 0.95);
+            border-bottom: 1px solid var(--border);
+            padding: 20px 0;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 0 24px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .header-title {
+            font-size: 24px;
+            font-weight: 700;
+            background: linear-gradient(90deg, var(--accent) 0%, var(--accent-purple) 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header-subtitle {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-left: 16px;
+            padding-left: 16px;
+            border-left: 1px solid var(--border);
+        }
+
+        .status-badge {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+            padding: 6px 12px;
+            border-radius: 4px;
+            font-size: 12px;
+            font-weight: 600;
+        }
+
+        /* ========== MAIN LAYOUT ========== */
+        .main {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 32px 24px;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 8px;
+            margin-bottom: 32px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .tab {
+            padding: 12px 24px;
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 14px;
+            font-weight: 600;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s ease;
+        }
+
+        .tab:hover {
+            color: var(--text-primary);
+        }
+
+        .tab.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        /* ========== FORM STYLES ========== */
+        .form-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 32px;
+            margin-bottom: 24px;
+        }
+
+        .form-section-title {
+            font-size: 16px;
+            font-weight: 700;
+            margin-bottom: 20px;
+            color: var(--accent);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 24px;
+            margin-bottom: 24px;
+        }
+
+        .form-group {
+            display: flex;
+            flex-direction: column;
+        }
+
+        .form-group label {
+            font-size: 13px;
+            font-weight: 600;
+            margin-bottom: 8px;
+            color: var(--text-primary);
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+        }
+
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px 16px;
+            color: var(--text-primary);
+            font-size: 14px;
+            transition: all 0.2s ease;
+            font-family: inherit;
+        }
+
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            background: rgba(255, 255, 255, 0.08);
+            border-color: var(--accent);
+            box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1);
+        }
+
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+
+        .form-group small {
+            color: var(--text-secondary);
+            font-size: 12px;
+            margin-top: 6px;
+        }
+
+        .checkbox-group {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+            gap: 12px;
+            margin-top: 8px;
+        }
+
+        .checkbox-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .checkbox-item input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            cursor: pointer;
+            accent-color: var(--accent);
+        }
+
+        .checkbox-item label {
+            cursor: pointer;
+            margin: 0;
+            text-transform: none;
+            letter-spacing: normal;
+            font-weight: 500;
+            font-size: 14px;
+        }
+
+        /* ========== BUTTONS ========== */
+        button {
+            font-family: inherit;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+            border-radius: 6px;
+            font-weight: 600;
+            font-size: 14px;
+        }
+
+        .btn {
+            padding: 12px 24px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(90deg, var(--accent) 0%, var(--accent-purple) 100%);
+            color: var(--bg-primary);
+        }
+
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 212, 255, 0.3);
+        }
+
+        .btn-primary:active {
+            transform: translateY(0);
+        }
+
+        .btn-secondary {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+        }
+
+        .btn-secondary:hover {
+            background: rgba(255, 255, 255, 0.15);
+            border-color: var(--accent);
+        }
+
+        .btn-small {
+            padding: 8px 16px;
+            font-size: 12px;
+        }
+
+        .btn-group {
+            display: flex;
+            gap: 12px;
+            margin-top: 24px;
+        }
+
+        /* ========== RESULTS ========== */
+        .results-container {
+            display: none;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 32px;
+            margin-bottom: 24px;
+        }
+
+        .results-container.active {
+            display: block;
+        }
+
+        .results-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 24px;
+            margin-bottom: 32px;
+        }
+
+        .result-card {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+        }
+
+        .result-label {
+            color: var(--text-secondary);
+            font-size: 12px;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            margin-bottom: 8px;
+        }
+
+        .result-value {
+            font-size: 32px;
+            font-weight: 700;
+            color: var(--accent);
+            margin-bottom: 4px;
+        }
+
+        .result-detail {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .risk-low {
+            color: var(--success);
+            border-left: 3px solid var(--success);
+        }
+
+        .risk-medium {
+            color: var(--warning);
+            border-left: 3px solid var(--warning);
+        }
+
+        .risk-high {
+            color: var(--danger);
+            border-left: 3px solid var(--danger);
+        }
+
+        .drivers-table {
+            width: 100%;
+            margin-top: 28px;
+            border-collapse: collapse;
+        }
+
+        .drivers-table th {
+            background: rgba(0, 212, 255, 0.1);
+            padding: 12px 16px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .drivers-table td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .drivers-table tr:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .driver-rank {
+            color: var(--accent);
+            font-weight: 700;
+        }
+
+        /* ========== BATCH UPLOAD ========== */
+        .upload-area {
+            background: rgba(0, 212, 255, 0.05);
+            border: 2px dashed var(--border);
+            border-radius: 8px;
+            padding: 48px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            margin-bottom: 24px;
+        }
+
+        .upload-area:hover {
+            background: rgba(0, 212, 255, 0.08);
+            border-color: var(--accent);
+        }
+
+        .upload-area.dragover {
+            background: rgba(0, 212, 255, 0.15);
+            border-color: var(--accent);
+        }
+
+        .upload-icon {
+            font-size: 48px;
+            margin-bottom: 16px;
+        }
+
+        .upload-text {
+            color: var(--text-primary);
+            font-size: 16px;
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+
+        .upload-subtext {
+            color: var(--text-secondary);
+            font-size: 14px;
+        }
+
+        #csvFile {
+            display: none;
+        }
+
+        /* ========== BATCH RESULTS TABLE ========== */
+        .batch-results {
+            overflow-x: auto;
+            margin-top: 32px;
+        }
+
+        .batch-table {
+            width: 100%;
+            border-collapse: collapse;
+            background: var(--bg-card);
+        }
+
+        .batch-table th {
+            background: rgba(0, 212, 255, 0.1);
+            padding: 14px 16px;
+            text-align: left;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 0.5px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .batch-table td {
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--border);
+            font-size: 13px;
+        }
+
+        .batch-table tbody tr:hover {
+            background: rgba(255, 255, 255, 0.03);
+        }
+
+        .status-success {
+            color: var(--success);
+            font-weight: 600;
+        }
+
+        .status-error {
+            color: var(--danger);
+            font-weight: 600;
+        }
+
+        .probability-bar {
+            width: 100%;
+            height: 6px;
+            background: rgba(255, 255, 255, 0.05);
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 4px 0;
+        }
+
+        .probability-fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--success) 0%, var(--warning) 50%, var(--danger) 100%);
+        }
+
+        /* ========== MESSAGES ========== */
+        .message {
+            padding: 16px;
+            border-radius: 6px;
+            margin-bottom: 16px;
+            font-size: 14px;
+            display: none;
+        }
+
+        .message.show {
+            display: block;
+            animation: slideIn 0.3s ease;
+        }
+
+        .message.success {
+            background: rgba(16, 185, 129, 0.1);
+            color: var(--success);
+            border: 1px solid rgba(16, 185, 129, 0.2);
+        }
+
+        .message.error {
+            background: rgba(239, 68, 68, 0.1);
+            color: var(--danger);
+            border: 1px solid rgba(239, 68, 68, 0.2);
+        }
+
+        .message.info {
+            background: rgba(0, 212, 255, 0.1);
+            color: var(--accent);
+            border: 1px solid rgba(0, 212, 255, 0.2);
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateY(-8px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* ========== LOADING ========== */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.2);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            color: var(--text-secondary);
+        }
+
+        /* ========== RESPONSIVE ========== */
+        @media (max-width: 768px) {
+            .form-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .results-grid {
+                grid-template-columns: 1fr;
+            }
+
+            .form-section {
+                padding: 20px;
+            }
+
+            .header-subtitle {
+                display: none;
+            }
+
+            .batch-table {
+                font-size: 12px;
+            }
+
+            .batch-table td {
+                padding: 8px 12px;
+            }
+
+            .upload-area {
+                padding: 32px 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="header-container">
+            <div>
+                <div class="header-title">Genivra Dashboard</div>
+                <span class="header-subtitle">CNS Clinical Trial Risk Intelligence</span>
+            </div>
+            <div style="display: flex; align-items: center; gap: 16px;">
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <label style="color: var(--text-secondary); font-size: 12px; font-weight: 600;">API Key:</label>
+                    <input 
+                        type="password" 
+                        id="apiKeyInput" 
+                        placeholder="Enter API key" 
+                        style="width: 200px; padding: 6px 12px; background: rgba(255, 255, 255, 0.05); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); font-size: 12px;"
+                        value="demo_tier1_key_12345"
+                    >
+                    <button class="btn btn-secondary btn-small" onclick="saveApiKey()" style="margin: 0;">Save</button>
+                </div>
+                <div class="status-badge" id="statusBadge">⏳ Checking API...</div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <div class="main">
+        <!-- Tabs -->
+        <div class="tabs">
+            <button class="tab active" data-tab="single">Single Prediction</button>
+            <button class="tab" data-tab="batch">Batch Predictions</button>
+        </div>
+
+        <!-- ========== TAB 1: SINGLE PREDICTION ========== -->
+        <div id="single" class="tab-content active">
+            <div id="singleMessage"></div>
+
+            <!-- Trial Design Section -->
+            <div class="form-section">
+                <div class="form-section-title">Trial Design</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Phase</label>
+                        <select id="phase" required>
+                            <option value="">Select Phase</option>
+                            <option value="Phase 1">Phase 1</option>
+                            <option value="Phase 2">Phase 2</option>
+                            <option value="Phase 3">Phase 3</option>
+                            <option value="Phase 4">Phase 4</option>
+                        </select>
+                        <small>Clinical trial phase</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Indication</label>
+                        <select id="indication" required>
+                            <option value="">Select Indication</option>
+                            <option value="Alzheimer's disease">Alzheimer's disease</option>
+                            <option value="Parkinson's disease">Parkinson's disease</option>
+                            <option value="Mild Cognitive Impairment">Mild Cognitive Impairment</option>
+                            <option value="Depression">Depression</option>
+                            <option value="Schizophrenia">Schizophrenia</option>
+                        </select>
+                        <small>Primary indication</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Trial Design Type</label>
+                        <select id="trialDesign" required>
+                            <option value="">Select Type</option>
+                            <option value="RCT">Randomized Controlled Trial</option>
+                            <option value="Open Label">Open Label</option>
+                            <option value="Double Blind">Double Blind</option>
+                        </select>
+                        <small>Type of trial design</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Sample Size</label>
+                        <input type="number" id="sampleSize" placeholder="e.g., 200" min="1" required>
+                        <small>Number of participants</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Duration (weeks)</label>
+                        <input type="number" id="duration" placeholder="e.g., 52" min="1" required>
+                        <small>Trial length in weeks</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Mean Age</label>
+                        <input type="number" id="ageMean" placeholder="e.g., 72.5" step="0.1" min="18" required>
+                        <small>Average participant age</small>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Endpoints Section -->
+            <div class="form-section">
+                <div class="form-section-title">Primary Endpoints</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Endpoint Type</label>
+                        <select id="endpointType" required>
+                            <option value="">Select Type</option>
+                            <option value="objective">Objective</option>
+                            <option value="subjective">Subjective</option>
+                            <option value="mixed">Mixed</option>
+                        </select>
+                        <small>Measurement approach</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Primary Endpoint Name</label>
+                        <select id="primaryEndpoint" required>
+                            <option value="">Select Endpoint</option>
+                            <option value="CDR-SB">CDR-SB (Dementia Rating)</option>
+                            <option value="ADAS-Cog">ADAS-Cog (Cognitive Assessment)</option>
+                            <option value="ADCOMS">ADCOMS (Composite Score)</option>
+                            <option value="MMSE">MMSE (Mini-Mental State)</option>
+                            <option value="UPDRS">UPDRS (Movement Assessment)</option>
+                        </select>
+                        <small>Primary outcome measure</small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Endpoint Variability (%)</label>
+                        <input type="number" id="endpointVariability" placeholder="e.g., 15" step="0.1" min="0">
+                        <small>Expected variability in measurements</small>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-top: 12px;">
+                    <label>Endpoint Description</label>
+                    <textarea id="endpointDescription" placeholder="Describe how this endpoint will be measured..."></textarea>
+                </div>
+            </div>
+
+            <!-- Biomarkers Section -->
+            <div class="form-section">
+                <div class="form-section-title">Biomarker Enrichment Strategy</div>
+                <div class="form-group">
+                    <label>Select Biomarkers (Optional)</label>
+                    <div class="checkbox-group">
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="biomarker_amyloid" value="amyloid">
+                            <label for="biomarker_amyloid">Amyloid PET</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="biomarker_tau" value="tau">
+                            <label for="biomarker_tau">Tau Pathology</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="biomarker_mri" value="mri">
+                            <label for="biomarker_mri">MRI Atrophy</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="biomarker_csf" value="csf">
+                            <label for="biomarker_csf">CSF Biomarkers</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="biomarker_blood" value="blood">
+                            <label for="biomarker_blood">Blood Biomarkers</label>
+                        </div>
+                        <div class="checkbox-item">
+                            <input type="checkbox" id="biomarker_apoe" value="apoe">
+                            <label for="biomarker_apoe">ApoE4 Status</label>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-grid" style="margin-top: 24px;">
+                    <div class="form-group">
+                        <label>Beta-Amyloid Level</label>
+                        <input type="number" id="betaAmyloid" placeholder="pg/mL" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>Phosphorylated Tau Level</label>
+                        <input type="number" id="phosphoTau" placeholder="pg/mL" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>Total Tau Level</label>
+                        <input type="number" id="totalTau" placeholder="pg/mL" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>Brain Atrophy Rate (%/year)</label>
+                        <input type="number" id="brainAtrophy" placeholder="e.g., 0.5" step="0.01">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Additional Enrollment -->
+            <div class="form-section">
+                <div class="form-section-title">Enrollment Parameters</div>
+                <div class="form-grid">
+                    <div class="form-group">
+                        <label>Female Enrollment (%)</label>
+                        <input type="number" id="femalePercent" placeholder="e.g., 50" min="0" max="100" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>APOE4 Carriers (%)</label>
+                        <input type="number" id="apoe4Percent" placeholder="e.g., 65" min="0" max="100" step="0.1">
+                    </div>
+                    <div class="form-group">
+                        <label>Dropout Rate (%)</label>
+                        <input type="number" id="dropoutRate" placeholder="e.g., 10" min="0" max="100" step="0.1">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Submit Button -->
+            <div class="btn-group">
+                <button class="btn btn-primary" id="submitBtn" onclick="submitSinglePrediction()">
+                    Predict Trial Success
+                </button>
+                <button class="btn btn-secondary" onclick="resetForm()">Reset Form</button>
+            </div>
+
+            <!-- Results -->
+            <div id="singleResults" class="results-container"></div>
+        </div>
+
+        <!-- ========== TAB 2: BATCH PREDICTIONS ========== -->
+        <div id="batch" class="tab-content">
+            <div id="batchMessage"></div>
+
+            <div class="form-section">
+                <div class="form-section-title">Upload CSV File</div>
+                
+                <div class="upload-area" id="uploadArea">
+                    <div class="upload-icon">📁</div>
+                    <div class="upload-text">Click to upload or drag and drop</div>
+                    <div class="upload-subtext">CSV file with trial data (sample columns: trial_sample_size, trial_duration_weeks, endpoint_type, primary_endpoint_name, age_mean)</div>
+                </div>
+
+                <input type="file" id="csvFile" accept=".csv" style="display: none;">
+
+                <div class="btn-group">
+                    <button class="btn btn-secondary btn-small" onclick="document.getElementById('csvFile').click()">
+                        Choose File
+                    </button>
+                    <button class="btn btn-secondary btn-small" onclick="downloadExample()">
+                        📥 Download Example CSV
+                    </button>
+                </div>
+            </div>
+
+            <!-- Batch Results -->
+            <div id="batchResults" class="results-container">
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 24px;">
+                    <div>
+                        <h3 style="font-size: 16px; margin-bottom: 8px;">Batch Results</h3>
+                        <div id="batchStats" style="color: var(--text-secondary); font-size: 14px;"></div>
+                    </div>
+                    <button class="btn btn-secondary btn-small" id="exportBtn" onclick="exportResults()">
+                        ⬇️ Export as CSV
+                    </button>
+                </div>
+
+                <div class="batch-results">
+                    <table class="batch-table">
+                        <thead>
+                            <tr>
+                                <th>Row</th>
+                                <th>Trial Name</th>
+                                <th>Status</th>
+                                <th>Success Probability</th>
+                                <th>Risk Tier</th>
+                                <th>Confidence</th>
+                                <th>Message</th>
+                            </tr>
+                        </thead>
+                        <tbody id="batchTableBody"></tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ========== CONSTANTS ==========
+        const API_BASE = 'http://localhost:8000';
+        let batchResults = null;
+        let apiKey = localStorage.getItem('apiKey') || 'demo_tier1_key_12345';  // Default demo key
+
+        // ========== TAB SWITCHING ==========
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                const tabName = tab.dataset.tab;
+                
+                // Update tabs
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                // Update content
+                document.querySelectorAll('.tab-content').forEach(content => {
+                    content.classList.remove('active');
+                });
+                document.getElementById(tabName).classList.add('active');
+            });
+        });
+
+        // ========== API KEY MANAGEMENT ==========
+        function saveApiKey() {
+            const key = document.getElementById('apiKeyInput').value.trim();
+            if (!key) {
+                showMessage(document.getElementById('singleMessage'), 'API key cannot be empty', 'error');
+                return;
+            }
+            apiKey = key;
+            localStorage.setItem('apiKey', key);
+            showMessage(document.getElementById('singleMessage'), 'API key saved successfully', 'success');
+            updateApiStatus();
+        }
+
+        function updateApiStatus() {
+            fetch(`${API_BASE}/health`, {
+                headers: {'x-api-key': apiKey}
+            })
+                .then(r => {
+                    if (r.ok) {
+                        document.getElementById('statusBadge').innerHTML = '✓ Connected';
+                        document.getElementById('statusBadge').style.background = 'rgba(16, 185, 129, 0.1)';
+                    } else {
+                        document.getElementById('statusBadge').innerHTML = '✗ Auth Failed';
+                        document.getElementById('statusBadge').style.background = 'rgba(239, 68, 68, 0.1)';
+                        document.getElementById('statusBadge').style.color = 'var(--danger)';
+                    }
+                })
+                .catch(() => {
+                    document.getElementById('statusBadge').innerHTML = '✗ API Offline';
+                    document.getElementById('statusBadge').style.background = 'rgba(239, 68, 68, 0.1)';
+                    document.getElementById('statusBadge').style.color = 'var(--danger)';
+                });
+        }
+
+        // ========== SINGLE PREDICTION ==========
+        async function submitSinglePrediction() {
+            const btn = document.getElementById('submitBtn');
+            const msg = document.getElementById('singleMessage');
+            
+            try {
+                btn.disabled = true;
+                btn.innerHTML = '<span class="spinner"></span> Processing...';
+                msg.innerHTML = '';
+
+                // Collect form data
+                const biomarkers = Array.from(document.querySelectorAll('.checkbox-group input:checked'))
+                    .map(cb => cb.value);
+
+                const formData = {
+                    phase: document.getElementById('phase').value,
+                    indication: document.getElementById('indication').value,
+                    trial_design: document.getElementById('trialDesign').value,
+                    trial_sample_size: parseInt(document.getElementById('sampleSize').value),
+                    trial_duration_weeks: parseInt(document.getElementById('duration').value),
+                    age_mean: parseFloat(document.getElementById('ageMean').value),
+                    endpoint_type: document.getElementById('endpointType').value,
+                    primary_endpoint_name: document.getElementById('primaryEndpoint').value,
+                    endpoint_variability: parseFloat(document.getElementById('endpointVariability').value) || 0,
+                    endpoint_description: document.getElementById('endpointDescription').value,
+                    biomarker_strategy: biomarkers,
+                    beta_amyloid: parseFloat(document.getElementById('betaAmyloid').value) || null,
+                    phosphorylated_tau: parseFloat(document.getElementById('phosphoTau').value) || null,
+                    total_tau: parseFloat(document.getElementById('totalTau').value) || null,
+                    brain_atrophy_rate: parseFloat(document.getElementById('brainAtrophy').value) || null,
+                    female_percent: parseFloat(document.getElementById('femalePercent').value) || 0,
+                    apoe4_percent: parseFloat(document.getElementById('apoe4Percent').value) || 0,
+                    dropout_rate: parseFloat(document.getElementById('dropoutRate').value) || 0
+                };
+
+                // Validate required fields
+                const required = ['phase', 'indication', 'trial_design', 'trial_sample_size', 
+                                'trial_duration_weeks', 'age_mean', 'endpoint_type', 'primary_endpoint_name'];
+                for (const field of required) {
+                    if (!formData[field]) {
+                        throw new Error(`Missing required field: ${field}`);
+                    }
+                }
+
+                // Send request
+                const response = await fetch(`${API_BASE}/predict`, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'x-api-key': apiKey,
+                    },
+                    body: JSON.stringify(formData)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || `API returned ${response.status}`);
+                }
+
+                const result = await response.json();
+                displaySingleResult(result);
+                showMessage(msg, 'Prediction successful!', 'success');
+
+            } catch (error) {
+                console.error('Error:', error);
+                showMessage(msg, error.message, 'error');
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = 'Predict Trial Success';
+            }
+        }
+
+        function displaySingleResult(data) {
+            const resultsDiv = document.getElementById('singleResults');
+            const riskClass = `risk-${(data.risk_tier || 'unknown').toLowerCase()}`;
+            const prob = (data.trial_success_probability * 100).toFixed(1);
+
+            let html = `
+                <div class="results-grid">
+                    <div class="result-card ${riskClass}">
+                        <div class="result-label">Success Probability</div>
+                        <div class="result-value">${prob}%</div>
+                        <div class="result-detail">Likelihood of success</div>
+                    </div>
+                    <div class="result-card ${riskClass}">
+                        <div class="result-label">Risk Tier</div>
+                        <div class="result-value" style="font-size: 24px;">${data.risk_tier || 'MEDIUM'}</div>
+                        <div class="result-detail">Overall risk assessment</div>
+                    </div>
+                    <div class="result-card">
+                        <div class="result-label">Confidence</div>
+                        <div class="result-value" style="font-size: 24px;">${data.confidence_flag || 'MEDIUM'}</div>
+                        <div class="result-detail">Prediction confidence level</div>
+                    </div>
+                </div>
+            `;
+
+            // Feature Drivers Table
+            if (data.top_feature_drivers && Array.isArray(data.top_feature_drivers)) {
+                html += `
+                    <div style="margin-top: 24px;">
+                        <h3 style="font-size: 14px; font-weight: 700; margin-bottom: 16px; color: var(--accent); text-transform: uppercase;">
+                            Top Feature Drivers
+                        </h3>
+                        <table class="drivers-table">
+                            <thead>
+                                <tr>
+                                    <th>Rank</th>
+                                    <th>Feature</th>
+                                    <th>Influence</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                `;
+                data.top_feature_drivers.slice(0, 5).forEach((driver, i) => {
+                    const influence = (driver.importance * 100).toFixed(1);
+                    html += `
+                        <tr>
+                            <td><span class="driver-rank">#${i + 1}</span></td>
+                            <td>${driver.feature_name || driver.name || driver}</td>
+                            <td>${influence}%</td>
+                        </tr>
+                    `;
+                });
+                html += `
+                            </tbody>
+                        </table>
+                    </div>
+                `;
+            }
+
+            // Biomarker Explanation
+            if (data.biomarker_explanation) {
+                html += `
+                    <div style="margin-top: 24px; padding: 16px; background: rgba(139, 92, 246, 0.1); border-left: 3px solid var(--accent-purple); border-radius: 4px;">
+                        <div style="font-size: 12px; font-weight: 700; color: var(--accent-purple); text-transform: uppercase; margin-bottom: 8px;">Biomarker Impact</div>
+                        <div style="color: var(--text-primary); font-size: 14px;">${data.biomarker_explanation}</div>
+                    </div>
+                `;
+            }
+
+            resultsDiv.innerHTML = html;
+            resultsDiv.classList.add('active');
+            resultsDiv.scrollIntoView({ behavior: 'smooth' });
+        }
+
+        // ========== BATCH PREDICTIONS ==========
+        const uploadArea = document.getElementById('uploadArea');
+        const csvFile = document.getElementById('csvFile');
+
+        // Upload area interactions
+        uploadArea.addEventListener('click', () => csvFile.click());
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('dragover');
+        });
+        uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('dragover');
+            handleFileUpload(e.dataTransfer.files[0]);
+        });
+
+        csvFile.addEventListener('change', (e) => {
+            if (e.target.files[0]) {
+                handleFileUpload(e.target.files[0]);
+            }
+        });
+
+        async function handleFileUpload(file) {
+            const msg = document.getElementById('batchMessage');
+            
+            try {
+                if (!file || !file.name.endsWith('.csv')) {
+                    throw new Error('Please select a CSV file');
+                }
+
+                showMessage(msg, 'Processing batch predictions...', 'info');
+
+                const formData = new FormData();
+                formData.append('file', file);
+
+                const response = await fetch(`${API_BASE}/predict_batch`, {
+                    method: 'POST',
+                    headers: {
+                        'x-api-key': apiKey,
+                    },
+                    body: formData
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || `API returned ${response.status}`);
+                }
+
+                const result = await response.json();
+                batchResults = result;
+                displayBatchResults(result);
+                showMessage(msg, `✓ Processed ${result.total_rows} rows (${result.successful} successful, ${result.failed} failed)`, 'success');
+
+            } catch (error) {
+                console.error('Error:', error);
+                showMessage(msg, error.message, 'error');
+            }
+        }
+
+        function displayBatchResults(data) {
+            const tbody = document.getElementById('batchTableBody');
+            const stats = document.getElementById('batchStats');
+            
+            stats.innerHTML = `
+                <span>Total: <strong>${data.total_rows}</strong></span> | 
+                <span>✓ Successful: <strong>${data.successful}</strong></span> | 
+                <span>✗ Failed: <strong>${data.failed}</strong></span>
+            `;
+
+            tbody.innerHTML = '';
+            data.results.forEach(result => {
+                const statusClass = result.success ? 'status-success' : 'status-error';
+                const status = result.success ? '✓ Success' : '✗ Error';
+                const prob = result.success ? (result.trial_success_probability * 100).toFixed(1) + '%' : '-';
+                const riskTier = result.success ? result.risk_tier || '-' : '-';
+                const confidence = result.success ? result.confidence_flag || '-' : '-';
+                const message = result.error_message || (result.success ? 'Prediction completed' : 'No error message');
+
+                const row = `
+                    <tr>
+                        <td>${result.row_number}</td>
+                        <td>${result.trial_name || '-'}</td>
+                        <td><span class="${statusClass}">${status}</span></td>
+                        <td>
+                            <div>${prob}</div>
+                            ${result.success ? `<div class="probability-bar"><div class="probability-fill" style="width: ${result.trial_success_probability * 100}%"></div></div>` : ''}
+                        </td>
+                        <td>${riskTier}</td>
+                        <td>${confidence}</td>
+                        <td><small>${message}</small></td>
+                    </tr>
+                `;
+                tbody.innerHTML += row;
+            });
+
+            document.getElementById('batchResults').classList.add('active');
+            document.getElementById('batchResults').scrollIntoView({ behavior: 'smooth' });
+        }
+
+        function exportResults() {
+            if (!batchResults) {
+                showMessage(document.getElementById('batchMessage'), 'No results to export', 'error');
+                return;
+            }
+
+            const rows = [
+                ['Row', 'Trial Name', 'Status', 'Success Probability', 'Risk Tier', 'Confidence', 'Message']
+            ];
+
+            batchResults.results.forEach(result => {
+                rows.push([
+                    result.row_number,
+                    result.trial_name || '',
+                    result.success ? 'Success' : 'Error',
+                    result.success ? (result.trial_success_probability * 100).toFixed(1) + '%' : '',
+                    result.success ? result.risk_tier || '' : '',
+                    result.success ? result.confidence_flag || '' : '',
+                    result.error_message || ''
+                ]);
+            });
+
+            const csv = rows.map(r => r.map(cell => `"${cell}"`).join(',')).join('\n');
+            const blob = new Blob([csv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `predictions_${new Date().toISOString().split('T')[0]}.csv`;
+            a.click();
+        }
+
+        function downloadExample() {
+            const exampleCsv = `trial_sample_size,trial_duration_weeks,phase,indication,trial_design,endpoint_type,primary_endpoint_name,age_mean,beta_amyloid,phosphorylated_tau,total_tau,brain_atrophy_rate,female_percent,apoe4_percent,dropout_rate
+200,52,Phase 3,Alzheimer's disease,Double Blind,objective,CDR-SB,72.5,850,65,250,0.8,50,65,10
+180,26,Phase 2,Mild Cognitive Impairment,RCT,subjective,ADAS-Cog,70.0,750,58,220,0.6,45,60,15
+300,52,Phase 3,Alzheimer's disease,Double Blind,mixed,ADCOMS,74.2,920,72,280,1.0,52,70,12
+150,52,Phase 2,Parkinson's disease,Open Label,objective,UPDRS,68.0,,,,,40,55,20
+250,26,Phase 3,Alzheimer's disease,Double Blind,subjective,MMSE,71.5,800,60,240,0.7,51,62,8`;
+
+            const blob = new Blob([exampleCsv], { type: 'text/csv' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'example_trials.csv';
+            a.click();
+        }
+
+        // ========== UTILITIES ==========
+        function resetForm() {
+            document.querySelectorAll('.form-group input, .form-group select, .form-group textarea').forEach(el => {
+                if (el.type === 'checkbox') {
+                    el.checked = false;
+                } else {
+                    el.value = '';
+                }
+            });
+            document.getElementById('singleResults').classList.remove('active');
+            document.getElementById('singleMessage').innerHTML = '';
+        }
+
+        function showMessage(element, text, type) {
+            element.innerHTML = `<div class="message ${type} show">${text}</div>`;
+            if (type === 'success') {
+                setTimeout(() => {
+                    element.querySelector('.message').classList.remove('show');
+                }, 5000);
+            }
+        }
+
+        // ========== INITIALIZATION ==========
+        window.addEventListener('load', () => {
+            // Load saved API key if available
+            const savedKey = localStorage.getItem('apiKey');
+            if (savedKey) {
+                document.getElementById('apiKeyInput').value = savedKey;
+                apiKey = savedKey;
+            }
+            
+            // Check API connection
+            updateApiStatus();
+        });
+    </script>
+</body>
+</html>

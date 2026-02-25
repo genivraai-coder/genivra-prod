@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Genivra - Batch CSV Upload</title>
+  <style>
+    body { font-family: Arial, sans-serif; margin: 24px; }
+    .container { max-width: 900px; margin: auto; }
+    h1 { margin-bottom: 8px; }
+    form { margin-bottom: 16px; }
+    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
+    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+    th { background: #f4f4f4; }
+    .status { margin-top: 8px; }
+    .error { color: red; }
+    .btn { padding: 8px 12px; cursor: pointer; border-radius: 4px; border: 1px solid #888; background: #fff; }
+    .btn-primary { background: #0b79ff; color: #fff; border-color: #0b79ff; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Upload Trial CSV for Predictions</h1>
+    <p>Upload a CSV file where the header row contains field names (e.g. phase, indication, trial_sample_size, baseline_mmse, apoe_e4_carrier, etc.). Each row will be sent to the `/predict` endpoint and the returned results will be displayed.</p>
+
+    <form id="uploadForm">
+      <label for="csvFile">Select CSV file (max 5 MB):</label>
+      <input type="file" id="csvFile" name="csvFile" accept=".csv" />
+      <button type="submit" class="btn btn-primary">Upload & Predict</button>
+    </form>
+
+    <div class="status" id="status"></div>
+
+    <div id="resultsArea" style="display:none">
+      <button id="downloadBtn" class="btn">Download CSV</button>
+      <table id="resultsTable" aria-live="polite">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>Probability</th>
+            <th>Risk Tier</th>
+            <th>Top Drivers</th>
+            <th>Biomarker Explanation</th>
+            <th>Confidence</th>
+          </tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <script>
+    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+    const uploadForm = document.getElementById('uploadForm');
+    const csvInput = document.getElementById('csvFile');
+    const statusDiv = document.getElementById('status');
+    const resultsArea = document.getElementById('resultsArea');
+    const resultsTableBody = document.querySelector('#resultsTable tbody');
+    const downloadBtn = document.getElementById('downloadBtn');
+
+    function setStatus(message, isError = false) {
+      statusDiv.textContent = message;
+      statusDiv.className = isError ? 'status error' : 'status';
+    }
+
+    function parseCSV(text) {
+      // Basic CSV parser (no advanced quoting support)
+      const lines = text.trim().split(/\r?\n/).filter(l => l.trim().length > 0);
+      if (lines.length === 0) return [];
+      const headers = lines[0].split(',').map(h => h.trim());
+      const rows = [];
+      for (let i = 1; i < lines.length; i++) {
+        const parts = lines[i].split(',');
+        const row = {};
+        for (let j = 0; j < headers.length; j++) {
+          row[headers[j]] = parts[j] !== undefined ? parts[j].trim() : '';
+        }
+        rows.push(row);
+      }
+      return rows;
+    }
+
+    async function postPrediction(payload) {
+      // POST to /predict endpoint; adjust origin/path if API is hosted elsewhere
+      try {
+        const resp = await fetch('/predict', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const data = await resp.json();
+        if (!resp.ok) throw new Error(data.error || JSON.stringify(data));
+        return data;
+      } catch (err) {
+        return { __error: true, message: err.message };
+      }
+    }
+
+    function renderResults(results) {
+      resultsTableBody.innerHTML = '';
+      results.forEach((r, idx) => {
+        const tr = document.createElement('tr');
+        const prob = r.probability_of_success !== undefined && r.probability_of_success !== null ? Number(r.probability_of_success).toFixed(3) : '';
+        const drivers = r.top_drivers ? (Array.isArray(r.top_drivers) ? r.top_drivers.map(d => d.feature || d.feature_name || JSON.stringify(d)).join('; ') : JSON.stringify(r.top_drivers)) : '';
+        tr.innerHTML = `
+          <td>${idx+1}</td>
+          <td>${prob}</td>
+          <td>${r.risk_tier || ''}</td>
+          <td>${drivers}</td>
+          <td>${r.biomarker_explanation || ''}</td>
+          <td>${r.confidence_flag || ''}</td>
+        `;
+        resultsTableBody.appendChild(tr);
+      });
+      resultsArea.style.display = results.length ? 'block' : 'none';
+    }
+
+    function resultsToCSV(results) {
+      const header = ['index','probability_of_success','risk_tier','top_drivers','biomarker_explanation','confidence_flag'];
+      const lines = [header.join(',')];
+      results.forEach((r, idx) => {
+        const drivers = r.top_drivers ? (Array.isArray(r.top_drivers) ? r.top_drivers.map(d => d.feature || d.feature_name || '').join('; ') : '') : '';
+        const row = [
+          idx+1,
+          r.probability_of_success !== undefined && r.probability_of_success !== null ? r.probability_of_success : '',
+          r.risk_tier || '',
+          '"' + drivers.replace(/"/g,'""') + '"',
+          '"' + (r.biomarker_explanation || '').replace(/"/g,'""') + '"',
+          r.confidence_flag || ''
+        ];
+        lines.push(row.join(','));
+      });
+      return lines.join('\n');
+    }
+
+    downloadBtn.addEventListener('click', () => {
+      const rows = Array.from(resultsTableBody.querySelectorAll('tr')).map(tr => {
+        const cells = Array.from(tr.children).map(td => td.textContent);
+        return cells;
+      });
+      // Reconstruct results from table for download
+      // Simpler: re-use lastResults if available
+      if (!window.lastResults || window.lastResults.length === 0) {
+        setStatus('No results to download', true);
+        return;
+      }
+      const csv = resultsToCSV(window.lastResults);
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'predictions_results.csv';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    });
+
+    uploadForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      setStatus('');
+      resultsArea.style.display = 'none';
+      resultsTableBody.innerHTML = '';
+      const file = csvInput.files[0];
+      if (!file) { setStatus('Please choose a CSV file to upload.', true); return; }
+      if (!file.name.toLowerCase().endsWith('.csv')) { setStatus('Only CSV files are accepted.', true); return; }
+      if (file.size > MAX_FILE_SIZE) { setStatus('File too large. Maximum 5 MB allowed.', true); return; }
+
+      setStatus('Reading file...');
+      const text = await file.text();
+      const rows = parseCSV(text);
+      if (rows.length === 0) { setStatus('CSV contains no data or header not found.', true); return; }
+
+      setStatus(`Sending ${rows.length} rows to /predict...`);
+      const results = [];
+      for (let i = 0; i < rows.length; i++) {
+        setStatus(`Processing row ${i+1} of ${rows.length}...`);
+        const payload = rows[i];
+        // Optionally nest fields into trial_design/enrollment/biomarkers based on header prefixes
+        // For now, send the flat object and let server handle fields
+        const res = await postPrediction(payload);
+        if (res && res.__error) {
+          // Capture error for this row, but continue
+          results.push({ probability_of_success: null, risk_tier: 'ERROR', top_drivers: [], biomarker_explanation: res.message, confidence_flag: '' });
+        } else {
+          results.push(res);
+        }
+      }
+
+      window.lastResults = results;
+      renderResults(results);
+      setStatus(`Completed ${rows.length} rows.`);
+    });
+  </script>
+</body>
+</html>
