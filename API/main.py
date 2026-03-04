@@ -21,10 +21,10 @@ from fastapi.responses import JSONResponse, Response
 import logging
 import pandas as pd
 
-# Add parent directory to path so we can import from Models
+# Add parent directory to path for imports
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
-from Models.predict_trial import predict_trial
+from engine.ml_engine import predict_trial, score_trial_rule_based
 from API.auth import APIKeyManager, KeyTier
 from API.config import settings, print_settings_summary
 from API.models import (
@@ -144,17 +144,23 @@ def convert_prediction_output(raw_output: dict) -> PredictionResponse:
     Convert raw predict_trial() output to Pydantic PredictionResponse.
     
     Args:
-        raw_output: Dictionary from predict_trial()
+        raw_output: Dictionary from predict_trial() with keys:
+                   - trial_success_probability
+                   - risk_tier
+                   - top_drivers (list of dicts with feature, coefficient, direction, importance_score)
+                   - biomarker_explanation
+                   - confidence_flag
+                   - missing_biomarker_count
     
     Returns:
         PredictionResponse: Validated Pydantic model
     """
-    # Convert top_feature_importance list of dicts to FeatureDriver objects
+    # Convert top_drivers list of dicts to FeatureDriver objects
     feature_drivers = []
-    if "top_feature_importance" in raw_output:
-        for feature_dict in raw_output["top_feature_importance"]:
-            # Handle dict structure from get_top_features()
-            # Dict contains: rank, feature, coefficient, importance_score, direction
+    if "top_drivers" in raw_output:
+        for feature_dict in raw_output["top_drivers"]:
+            # Dict structure from ml_engine.get_top_features():
+            # {rank, feature, coefficient, importance_score, direction}
             feature_name = feature_dict.get("feature", "unknown")
             coefficient = feature_dict.get("coefficient", 0.0)
             direction = "positive" if coefficient > 0 else "negative"
@@ -176,8 +182,8 @@ def convert_prediction_output(raw_output: dict) -> PredictionResponse:
         biomarker_explanation=raw_output.get("biomarker_explanation", ""),
         confidence_flag=raw_output.get("confidence_flag", "LOW"),
         missing_biomarker_count=int(raw_output.get("missing_biomarker_count", 0)),
-        model_version=raw_output.get("model_version", "v1.0"),
-        generated_timestamp=raw_output.get("generated_timestamp", datetime.utcnow().isoformat() + "Z"),
+        model_version="v2.0-consolidated",
+        generated_timestamp=datetime.utcnow().isoformat() + "Z",
     )
 
 

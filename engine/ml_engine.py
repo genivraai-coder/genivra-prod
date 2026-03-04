@@ -1,23 +1,29 @@
 """
-Logistic Regression Model Training for Alzheimer's Trial Success Prediction
+Genivra ML Engine - Consolidated Core ML Module
 
-Trains a logistic regression baseline model on synthetic AD trials dataset.
-Includes cross-validation, feature importance analysis, and model evaluation.
+Unified machine learning engine combining:
+- Data loading and synthetic trial generation
+- Feature engineering and preprocessing
+- Model training (logistic regression + decision tree)
+- Trial prediction with interpretability
+- Rule-based scoring baseline
+- Utility functions
 
-Outputs:
-- Model performance metrics (Accuracy, AUC, Confusion Matrix)
-- Feature importance ranked by coefficient magnitude
-- Trained model saved as pickle artifact
+This module serves as the single source of truth for all ML operations.
+All API endpoints should import from here.
 
 Author: Genivra ML Team
-Date: February 20, 2026
-Version: 1.0
+Date: March 3, 2026
+Version: 2.0 (Consolidated)
 """
 
+# ====== IMPORTS ======
 import os
 import pickle
 import warnings
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Any, Optional, List
+from datetime import datetime
+from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -37,43 +43,154 @@ from sklearn.metrics import (
 warnings.filterwarnings("ignore", category=DeprecationWarning)
 
 
-# ============================================================================
-# Configuration
-# ============================================================================
+# ====== CONFIGURATION ======
 
-class Config:
-    """Training configuration."""
+class MLConfig:
+    """Machine learning engine configuration."""
     
+    # Paths
     DATA_PATH = "data/processed/synthetic_ad_trials.csv"
     ARTIFACT_DIR = "models/artifacts"
     MODEL_SAVE_PATH = os.path.join(ARTIFACT_DIR, "logistic_model.pkl")
     SCALER_SAVE_PATH = os.path.join(ARTIFACT_DIR, "feature_scaler.pkl")
     TREE_MODEL_SAVE_PATH = os.path.join(ARTIFACT_DIR, "decision_tree_model.pkl")
     
+    # Training parameters
     TEST_SIZE = 0.20
     RANDOM_STATE = 42
     
     # Features to exclude from training
     EXCLUDE_FEATURES = [
         "trial_id",
-        "trial_success_probability",  # Target-adjacent (leakage risk)
-        "trial_success",  # This is our label
+        "trial_success_probability",
+        "trial_success",
     ]
     
-    # Features to include (can be customized)
-    INCLUDE_FEATURES = None  # If None, auto-detect
+    # Risk tier thresholds (success probability cutoffs)
+    RISK_THRESHOLDS = {
+        "HIGH": 0.40,    # < 0.40 = HIGH risk
+        "MEDIUM": 0.70,  # 0.40 - 0.69 = MEDIUM risk
+        "LOW": 1.0       # >= 0.70 = LOW risk
+    }
+    
+    # Required biomarkers for HIGH confidence
+    REQUIRED_BIOMARKERS = [
+        "apoe_e4_carrier",
+        "ptau217_high",
+        "amyloid_pet_positive",
+        "age_mean",
+        "baseline_mmse",
+        "cdr_baseline",
+        "trial_sample_size",
+        "trial_duration_weeks",
+        "endpoint_type",
+        "primary_endpoint_name",
+        "biomarker_enrichment_strategy",
+    ]
+    
+    # Categorical features that need one-hot encoding
+    CATEGORICAL_FEATURES = [
+        "endpoint_type",
+        "primary_endpoint_name",
+        "biomarker_enrichment_strategy",
+        "randomization_ratio",
+    ]
+    
+    # Expected features after one-hot encoding (in training order)
+    EXPECTED_FEATURES = [
+        "apoe_e4_carrier",
+        "apoe_e4_homozygous",
+        "ptau217_continuous",
+        "ptau217_high",
+        "csf_abeta42_40_ratio_continuous",
+        "csf_abeta42_40_ratio_low",
+        "csf_ptau_elevated",
+        "amyloid_pet_positive",
+        "tau_pet_positive",
+        "hippocampal_atrophy_mri",
+        "hippocampal_atrophy_binary",
+        "age_mean",
+        "baseline_mmse",
+        "baseline_moca",
+        "cdr_baseline",
+        "trial_sample_size",
+        "trial_duration_weeks",
+        "number_of_arms",
+        "endpoint_type_objective",
+        "endpoint_type_subjective",
+        "primary_endpoint_name_ADCOMS",
+        "primary_endpoint_name_CDR-SB",
+        "primary_endpoint_name_MMSE",
+        "biomarker_enrichment_strategy_at_positive",
+        "biomarker_enrichment_strategy_cognitive_only",
+        "biomarker_enrichment_strategy_none",
+        "biomarker_enrichment_strategy_tau_positive",
+        "randomization_ratio_2:1",
+        "randomization_ratio_open_label",
+    ]
 
 
-# ============================================================================
-# Data Loading & Preparation
-# ============================================================================
+class RuleBasedWeights:
+    """Rule-based scoring weights encoding clinical domain knowledge."""
+    
+    # Biomarker contributions
+    AMYLOID_PET_POSITIVE = 0.25
+    PTAU217_HIGH = 0.20
+    CSF_ABETA42_40_LOW = 0.15
+    CSF_PTAU_ELEVATED = 0.12
+    TAU_PET_POSITIVE = 0.10
+    APOE_E4_CARRIER = 0.15
+    APOE_E4_HOMOZYGOUS = 0.08
+    HIPPOCAMPAL_ATROPHY = 0.05
+    
+    # Trial design contributions
+    LONG_DURATION_GE_52_WEEKS = 0.10
+    MEDIUM_DURATION_GE_36_WEEKS = 0.05
+    ADEQUATE_SAMPLE_SIZE_GE_250 = 0.08
+    GOOD_SAMPLE_SIZE_GE_150 = 0.04
+    GOOD_ENDPOINT_TYPE_MIXED = 0.02
+    GOOD_PRIMARY_ENDPOINT = 0.05
+    RANDOMIZED_STRUCTURE = 0.03
+    ADAPTIVE_RANDOMIZATION = 0.02
+    
+    # Cognitive stage contributions
+    BASELINE_MMSE_MCI_SWEET_SPOT = 0.10
+    BASELINE_MMSE_MILD_DEMENTIA = 0.03
+    HIPPOCAMPAL_VOLUME_NORMAL = 0.05
+    
+    # Enrichment bonus
+    ENRICHMENT_AT_POSITIVE = 0.08
+    ENRICHMENT_AMYLOID_POSITIVE = 0.06
+    
+    # Age adjustment
+    AGE_SWEET_SPOT_60_75 = 0.04
+    
+    # Penalties
+    SMALL_SAMPLE_LT_100 = -0.20
+    MEDIUM_SMALL_SAMPLE_LT_150 = -0.10
+    SHORT_DURATION_LT_24_WEEKS = -0.12
+    MEDIUM_SHORT_DURATION_LT_36_WEEKS = -0.06
+    ADVANCED_DEMENTIA_MMSE_LT_16 = -0.20
+    VERY_ADVANCED_DEMENTIA_MMSE_LT_10 = -0.30
+    MILD_COGNITIVE_DECLINE_MMSE_GT_26 = -0.08
+    NO_ENRICHMENT = -0.10
+    OPEN_LABEL_STRUCTURE = -0.08
+    OBJECTIVE_ENDPOINT_ONLY = -0.05
+    UNCOMMON_ENDPOINT = -0.03
+    
+    # Age penalties
+    AGE_LT_60 = -0.05
+    AGE_GT_80 = -0.06
+
+
+# ====== DATA LOADING FUNCTIONS ======
 
 def load_and_prepare_data(data_path: str) -> Tuple[pd.DataFrame, pd.Series, list]:
     """
     Load synthetic trial data and prepare for training.
     
     Args:
-        data_path (str): Path to CSV file.
+        data_path: Path to CSV file with trial data.
     
     Returns:
         Tuple of (X: features DataFrame, y: labels Series, feature_names: list)
@@ -89,7 +206,7 @@ def load_and_prepare_data(data_path: str) -> Tuple[pd.DataFrame, pd.Series, list
     # Select features
     feature_cols = [
         col for col in df.columns 
-        if col not in Config.EXCLUDE_FEATURES
+        if col not in MLConfig.EXCLUDE_FEATURES
     ]
     X = df[feature_cols].copy()
     
@@ -113,14 +230,10 @@ def load_and_prepare_data(data_path: str) -> Tuple[pd.DataFrame, pd.Series, list
                 X[col] = X[col].fillna(mode_val)
         print(f"  ✓ Filled missing values")
     
-    # Convert categorical features to numeric
+    # Convert categorical features to numeric via one-hot encoding
     categorical_cols = X.select_dtypes(include=['object']).columns.tolist()
     if len(categorical_cols) > 0:
-        print(f"\n  ⚠ Found {len(categorical_cols)} categorical features:")
-        for col in categorical_cols:
-            print(f"    - {col}: {X[col].nunique()} unique values")
-        
-        # One-hot encode
+        print(f"\n  ⚠ Found {len(categorical_cols)} categorical features")
         X = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
         print(f"  ✓ One-hot encoded categorical features")
         print(f"    New shape: {X.shape}")
@@ -128,9 +241,65 @@ def load_and_prepare_data(data_path: str) -> Tuple[pd.DataFrame, pd.Series, list
     return X, y, X.columns.tolist()
 
 
-# ============================================================================
-# Model Training
-# ============================================================================
+# ====== FEATURE ENGINEERING ======
+
+def engineer_features(input_dict: Dict[str, Any]) -> Tuple[pd.DataFrame, List[str]]:
+    """
+    Convert raw trial input to engineered features matching training pipeline.
+    
+    Args:
+        input_dict: Raw trial data with all fields.
+    
+    Returns:
+        Tuple of (engineered_features DataFrame, feature_names list)
+    """
+    X = pd.DataFrame([input_dict]).copy()
+    
+    # Fill missing values in numerical columns
+    numerical_cols = [
+        "apoe_e4_carrier", "apoe_e4_homozygous", "ptau217_continuous", "ptau217_high",
+        "csf_abeta42_40_ratio_continuous", "csf_abeta42_40_ratio_low", "csf_ptau_elevated",
+        "amyloid_pet_positive", "tau_pet_positive", "hippocampal_atrophy_mri",
+        "hippocampal_atrophy_binary", "age_mean", "baseline_mmse", "baseline_moca",
+        "cdr_baseline", "trial_sample_size", "trial_duration_weeks", "number_of_arms"
+    ]
+    
+    for col in numerical_cols:
+        if col in X.columns:
+            X[col] = pd.to_numeric(X[col], errors='coerce')
+            if X[col].isnull().any():
+                X[col] = X[col].fillna(0.0)
+        else:
+            X[col] = 0.0
+    
+    # Handle categorical columns
+    categorical_cols = [
+        "endpoint_type", "primary_endpoint_name", 
+        "biomarker_enrichment_strategy", "randomization_ratio"
+    ]
+    
+    for col in categorical_cols:
+        if col in X.columns:
+            X[col] = X[col].fillna("unknown")
+            X[col] = X[col].astype(str)
+        else:
+            X[col] = "unknown"
+    
+    # One-hot encode categorical features
+    X_encoded = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
+    
+    # Add missing encoded features with 0 values
+    for feature in MLConfig.EXPECTED_FEATURES:
+        if feature not in X_encoded.columns:
+            X_encoded[feature] = 0
+    
+    # Reorder columns to match expected feature order
+    X_final = X_encoded[MLConfig.EXPECTED_FEATURES].copy()
+    
+    return X_final, MLConfig.EXPECTED_FEATURES
+
+
+# ====== MODEL TRAINING ======
 
 def train_model(X_train: pd.DataFrame, y_train: pd.Series) -> Tuple[LogisticRegression, StandardScaler]:
     """
@@ -146,16 +315,16 @@ def train_model(X_train: pd.DataFrame, y_train: pd.Series) -> Tuple[LogisticRegr
     print("\nTraining Logistic Regression Model")
     print("=" * 80)
     
-    # Standardize features (important for logistic regression)
+    # Standardize features
     scaler = StandardScaler()
     X_train_scaled = scaler.fit_transform(X_train)
     
     # Train model
     model = LogisticRegression(
         max_iter=1000,
-        random_state=Config.RANDOM_STATE,
+        random_state=MLConfig.RANDOM_STATE,
         solver="lbfgs",
-        class_weight="balanced",  # Handle class imbalance if present
+        class_weight="balanced",
         verbose=0
     )
     
@@ -168,10 +337,6 @@ def train_model(X_train: pd.DataFrame, y_train: pd.Series) -> Tuple[LogisticRegr
     return model, scaler
 
 
-# ============================================================================
-# Model Evaluation
-# ============================================================================
-
 def evaluate_model(
     model: LogisticRegression,
     scaler: StandardScaler,
@@ -183,7 +348,7 @@ def evaluate_model(
     Evaluate model on test set.
     
     Args:
-        model: Trained logistic regression model.
+        model: Trained model.
         scaler: Fitted feature scaler.
         X_test: Test features.
         y_test: Test labels.
@@ -204,468 +369,417 @@ def evaluate_model(
     
     # Metrics
     accuracy = accuracy_score(y_test, y_pred)
-    roc_auc = roc_auc_score(y_test, y_pred_proba)
-    conf_matrix = confusion_matrix(y_test, y_pred)
+    auc_score = roc_auc_score(y_test, y_pred_proba)
+    cm = confusion_matrix(y_test, y_pred)
     
-    print(f"  Accuracy:  {accuracy:.4f}")
-    print(f"  ROC-AUC:   {roc_auc:.4f}")
-    
-    print(f"\n  Confusion Matrix:")
-    print(f"    TN: {conf_matrix[0, 0]:3d}  |  FP: {conf_matrix[0, 1]:3d}")
-    print(f"    FN: {conf_matrix[1, 0]:3d}  |  TP: {conf_matrix[1, 1]:3d}")
-    
-    # Detailed classification report
-    print(f"\n  Classification Report:")
-    print(classification_report(y_test, y_pred, target_names=["Fail (0)", "Success (1)"]))
-    
-    # Feature importance
-    feature_importance = compute_feature_importance(model, feature_names)
-    
-    results = {
-        "accuracy": accuracy,
-        "roc_auc": roc_auc,
-        "confusion_matrix": conf_matrix,
-        "y_pred": y_pred,
-        "y_pred_proba": y_pred_proba,
-        "feature_importance": feature_importance,
-    }
-    
-    return results
-
-
-def compute_feature_importance(model: LogisticRegression, feature_names: list) -> pd.DataFrame:
-    """
-    Extract feature importance from logistic regression coefficients.
-    
-    Args:
-        model: Trained model.
-        feature_names: List of feature names.
-    
-    Returns:
-        DataFrame with features ranked by importance.
-    """
-    print(f"\nFeature Importance (from coefficients)")
-    print("=" * 80)
-    
-    # Extract coefficients
-    coefficients = model.coef_[0]
-    
-    # Create importance dataframe
-    importance_df = pd.DataFrame({
-        "feature": feature_names,
-        "coefficient": coefficients,
-        "abs_coefficient": np.abs(coefficients),
-    })
-    
-    # Sort by absolute coefficient (magnitude = importance)
-    importance_df = importance_df.sort_values("abs_coefficient", ascending=False)
-    importance_df["rank"] = range(1, len(importance_df) + 1)
-    
-    # Display top 20
-    print(f"\n  Top 20 Most Important Features:")
-    print(f"  (Positive = increases success probability; Negative = decreases)")
-    print()
-    
-    top_n = min(20, len(importance_df))
-    for idx, row in importance_df.head(top_n).iterrows():
-        direction = "↑ increases" if row["coefficient"] > 0 else "↓ decreases"
-        print(f"    {row['rank']:2d}. {row['feature']:40s} {row['coefficient']:8.4f}  {direction}")
-    
-    print(f"\n  Bottom 10 Least Important Features:")
-    print()
-    bottom_n = min(10, len(importance_df))
-    for idx, row in importance_df.tail(bottom_n).iterrows():
-        direction = "↑ increases" if row["coefficient"] > 0 else "↓ decreases"
-        print(f"    {row['rank']:2d}. {row['feature']:40s} {row['coefficient']:8.4f}  {direction}")
-    
-    return importance_df
-
-
-# ============================================================================
-# Decision Tree Training & Evaluation
-# ============================================================================
-
-def train_decision_tree(X_train: pd.DataFrame, y_train: pd.Series, max_depth: int = 4) -> DecisionTreeClassifier:
-    """
-    Train decision tree classifier.
-    
-    Args:
-        X_train: Training features.
-        y_train: Training labels.
-        max_depth: Maximum tree depth. Default 4 to prevent overfitting.
-    
-    Returns:
-        Trained decision tree model.
-    """
-    print("\nTraining Decision Tree Model (max_depth={})".format(max_depth))
-    print("=" * 80)
-    
-    # Train model (no scaling needed for trees)
-    model = DecisionTreeClassifier(
-        max_depth=max_depth,
-        min_samples_split=5,
-        min_samples_leaf=2,
-        random_state=Config.RANDOM_STATE,
-        class_weight="balanced",
-    )
-    
-    model.fit(X_train, y_train)
-    
-    print(f"  ✓ Decision tree trained")
-    print(f"    Max depth: {max_depth}")
-    print(f"    Leaf nodes: {model.get_n_leaves()}")
-    print(f"    Tree depth: {model.get_depth()}")
-    
-    return model
-
-
-def evaluate_decision_tree(
-    model: DecisionTreeClassifier,
-    X_test: pd.DataFrame,
-    y_test: pd.Series,
-    feature_names: list
-) -> Dict:
-    """
-    Evaluate decision tree on test set.
-    
-    Args:
-        model: Trained decision tree model.
-        X_test: Test features.
-        y_test: Test labels.
-        feature_names: List of feature names.
-    
-    Returns:
-        Dictionary with evaluation metrics.
-    """
-    print("\nDecision Tree Evaluation")
-    print("=" * 80)
-    
-    # Predictions
-    y_pred = model.predict(X_test)
-    y_pred_proba = model.predict_proba(X_test)[:, 1]
-    
-    # Metrics
-    accuracy = accuracy_score(y_test, y_pred)
-    roc_auc = roc_auc_score(y_test, y_pred_proba)
-    conf_matrix = confusion_matrix(y_test, y_pred)
-    
-    print(f"  Accuracy:  {accuracy:.4f}")
-    print(f"  ROC-AUC:   {roc_auc:.4f}")
-    
-    print(f"\n  Confusion Matrix:")
-    print(f"    TN: {conf_matrix[0, 0]:3d}  |  FP: {conf_matrix[0, 1]:3d}")
-    print(f"    FN: {conf_matrix[1, 0]:3d}  |  TP: {conf_matrix[1, 1]:3d}")
-    
-    # Detailed classification report
-    print(f"\n  Classification Report:")
-    print(classification_report(y_test, y_pred, target_names=["Fail (0)", "Success (1)"]))
-    
-    # Feature importance
-    feature_importance = compute_tree_feature_importance(model, feature_names)
-    
-    results = {
-        "accuracy": accuracy,
-        "roc_auc": roc_auc,
-        "confusion_matrix": conf_matrix,
-        "y_pred": y_pred,
-        "y_pred_proba": y_pred_proba,
-        "feature_importance": feature_importance,
-    }
-    
-    return results
-
-
-def compute_tree_feature_importance(model: DecisionTreeClassifier, feature_names: list) -> pd.DataFrame:
-    """
-    Extract feature importance from decision tree.
-    
-    Args:
-        model: Trained decision tree model.
-        feature_names: List of feature names.
-    
-    Returns:
-        DataFrame with features ranked by importance.
-    """
-    print(f"\nFeature Importance (from decision tree splits)")
-    print("=" * 80)
-    
-    # Extract importances (Gini-based)
-    importances = model.feature_importances_
-    
-    # Create importance dataframe
-    importance_df = pd.DataFrame({
-        "feature": feature_names,
-        "importance": importances,
-        "importance_pct": importances * 100,
-    })
-    
-    # Sort by importance
-    importance_df = importance_df.sort_values("importance", ascending=False)
-    importance_df["rank"] = range(1, len(importance_df) + 1)
-    
-    # Display top 15
-    print(f"\n  Top 15 Most Important Features:")
-    print()
-    
-    top_n = min(15, len(importance_df))
-    for idx, row in importance_df.head(top_n).iterrows():
-        pct_bar = "█" * int(row["importance_pct"] / 2)  # Scale to 50 chars max
-        print(f"    {row['rank']:2d}. {row['feature']:40s} {row['importance']:.4f}  {pct_bar}")
-    
-    return importance_df
-
-
-def run_cross_validation(X: pd.DataFrame, y: pd.Series, n_folds: int = 5) -> Dict:
-    """
-    Run k-fold cross-validation for both logistic regression and decision tree.
-    
-    Args:
-        X: Features.
-        y: Labels.
-        n_folds: Number of folds.
-    
-    Returns:
-        Dictionary with CV results for both models.
-    """
-    print(f"\nCross-Validation ({n_folds}-fold)")
-    print("=" * 80)
-    
-    # Scale features for logistic regression
-    scaler = StandardScaler()
-    X_scaled = scaler.fit_transform(X)
-    
-    # Logistic Regression CV
-    print("\nLogistic Regression:")
-    lr_model = LogisticRegression(
-        max_iter=1000,
-        random_state=Config.RANDOM_STATE,
-        solver="lbfgs",
-        class_weight="balanced"
-    )
-    
-    lr_cv_scores_accuracy = cross_val_score(lr_model, X_scaled, y, cv=n_folds, scoring="accuracy")
-    lr_cv_scores_auc = cross_val_score(lr_model, X_scaled, y, cv=n_folds, scoring="roc_auc")
-    
-    print(f"  Accuracy: {lr_cv_scores_accuracy.mean():.4f} (+/- {lr_cv_scores_accuracy.std():.4f})")
-    print(f"  ROC-AUC:  {lr_cv_scores_auc.mean():.4f} (+/- {lr_cv_scores_auc.std():.4f})")
-    
-    # Decision Tree CV
-    print("\nDecision Tree (max_depth=4):")
-    dt_model = DecisionTreeClassifier(
-        max_depth=4,
-        min_samples_split=5,
-        min_samples_leaf=2,
-        random_state=Config.RANDOM_STATE,
-        class_weight="balanced"
-    )
-    
-    dt_cv_scores_accuracy = cross_val_score(dt_model, X, y, cv=n_folds, scoring="accuracy")
-    dt_cv_scores_auc = cross_val_score(dt_model, X, y, cv=n_folds, scoring="roc_auc")
-    
-    print(f"  Accuracy: {dt_cv_scores_accuracy.mean():.4f} (+/- {dt_cv_scores_accuracy.std():.4f})")
-    print(f"  ROC-AUC:  {dt_cv_scores_auc.mean():.4f} (+/- {dt_cv_scores_auc.std():.4f})")
+    print(f"  ✓ Accuracy: {accuracy:.4f}")
+    print(f"  ✓ AUC: {auc_score:.4f}")
+    print(f"  ✓ Confusion Matrix:\n{cm}")
     
     return {
-        "logistic_regression": {
-            "accuracy_scores": lr_cv_scores_accuracy,
-            "auc_scores": lr_cv_scores_auc,
-        },
-        "decision_tree": {
-            "accuracy_scores": dt_cv_scores_accuracy,
-            "auc_scores": dt_cv_scores_auc,
-        }
+        "accuracy": accuracy,
+        "auc": auc_score,
+        "confusion_matrix": cm.tolist(),
     }
 
 
-
-# ============================================================================
-# Model Persistence
-# ============================================================================
-
-def save_model(model: LogisticRegression, scaler: StandardScaler, artifact_dir: str = Config.ARTIFACT_DIR) -> None:
+def save_model(model: LogisticRegression, scaler: StandardScaler, model_path: str = None, scaler_path: str = None):
     """
-    Save trained models and scaler to disk.
+    Save trained model and scaler to disk.
     
     Args:
-        model: Trained logistic regression model dict or single model.
-        scaler: Fitted feature scaler.
-        artifact_dir: Directory to save artifacts.
+        model: Trained model object.
+        scaler: Fitted scaler object.
+        model_path: Path to save model (default: MLConfig.MODEL_SAVE_PATH).
+        scaler_path: Path to save scaler (default: MLConfig.SCALER_SAVE_PATH).
     """
-    print(f"\nSaving Model Artifacts")
-    print("=" * 80)
+    model_path = model_path or MLConfig.MODEL_SAVE_PATH
+    scaler_path = scaler_path or MLConfig.SCALER_SAVE_PATH
     
-    os.makedirs(artifact_dir, exist_ok=True)
+    os.makedirs(os.path.dirname(model_path), exist_ok=True)
     
-    # Handle both single model and dict of models
-    if isinstance(model, dict):
-        # Save logistic regression
-        with open(Config.MODEL_SAVE_PATH, "wb") as f:
-            pickle.dump(model.get("logistic_regression"), f)
-        print(f"  ✓ Logistic Regression model saved to: {Config.MODEL_SAVE_PATH}")
-        
-        # Save decision tree
-        with open(Config.TREE_MODEL_SAVE_PATH, "wb") as f:
-            pickle.dump(model.get("decision_tree"), f)
-        print(f"  ✓ Decision Tree model saved to: {Config.TREE_MODEL_SAVE_PATH}")
-    else:
-        # Legacy: single model
-        with open(Config.MODEL_SAVE_PATH, "wb") as f:
-            pickle.dump(model, f)
-        print(f"  ✓ Model saved to: {Config.MODEL_SAVE_PATH}")
+    with open(model_path, "wb") as f:
+        pickle.dump(model, f)
+    print(f"  ✓ Model saved to {model_path}")
     
-    # Save scaler
-    with open(Config.SCALER_SAVE_PATH, "wb") as f:
+    with open(scaler_path, "wb") as f:
         pickle.dump(scaler, f)
-    print(f"  ✓ Scaler saved to: {Config.SCALER_SAVE_PATH}")
+    print(f"  ✓ Scaler saved to {scaler_path}")
 
 
-# ============================================================================
-# Main Execution
-# ============================================================================
+# ====== PREDICTION FUNCTIONS ======
 
-def main():
+def load_model_and_scaler(model_path: str = None, scaler_path: str = None) -> Tuple[Any, StandardScaler]:
     """
-    Main training pipeline: train both logistic regression and decision tree.
-    """
-    print("\n" + "=" * 80)
-    print("Baseline Model Training - Alzheimer's Trial Success Prediction")
-    print("=" * 80)
-    
-    # Load data
-    X, y, feature_names = load_and_prepare_data(Config.DATA_PATH)
-    
-    # Train/test split
-    print(f"\nTrain/Test Split ({(1-Config.TEST_SIZE)*100:.0f}% / {Config.TEST_SIZE*100:.0f}%)")
-    print("=" * 80)
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y,
-        test_size=Config.TEST_SIZE,
-        random_state=Config.RANDOM_STATE,
-        stratify=y
-    )
-    print(f"  Train set: {len(X_train)} samples")
-    print(f"  Test set:  {len(X_test)} samples")
-    print(f"  Train labels: {y_train.value_counts().to_dict()}")
-    print(f"  Test labels:  {y_test.value_counts().to_dict()}")
-    
-    # ===== LOGISTIC REGRESSION =====
-    lr_model, scaler = train_model(X_train, y_train)
-    lr_results = evaluate_model(lr_model, scaler, X_test, y_test, feature_names)
-    
-    # ===== DECISION TREE =====
-    dt_model = train_decision_tree(X_train, y_train, max_depth=4)
-    dt_results = evaluate_decision_tree(dt_model, X_test, y_test, feature_names)
-    
-    # ===== CROSS-VALIDATION =====
-    cv_results = run_cross_validation(X, y, n_folds=5)
-    
-    # ===== COMPARISON TABLE =====
-    print_comparison_table(lr_results, dt_results, cv_results)
-    
-    # ===== SAVE MODELS =====
-    models = {
-        "logistic_regression": lr_model,
-        "decision_tree": dt_model,
-    }
-    save_model(models, scaler)
-    
-    # Summary
-    print(f"\n" + "=" * 80)
-    print("Training Complete")
-    print("=" * 80)
-    print(f"\nModel artifacts saved to: {Config.ARTIFACT_DIR}/")
-    print("=" * 80 + "\n")
-    
-    return {
-        "logistic_regression": {"model": lr_model, "results": lr_results},
-        "decision_tree": {"model": dt_model, "results": dt_results},
-    }, scaler, cv_results
-
-
-def print_comparison_table(lr_results: Dict, dt_results: Dict, cv_results: Dict) -> None:
-    """
-    Print a comparison table of model performance.
+    Load trained model and scaler from disk.
     
     Args:
-        lr_results: Logistic regression evaluation results.
-        dt_results: Decision tree evaluation results.
-        cv_results: Cross-validation results.
+        model_path: Path to model (default: MLConfig.MODEL_SAVE_PATH).
+        scaler_path: Path to scaler (default: MLConfig.SCALER_SAVE_PATH).
+    
+    Returns:
+        Tuple of (model, scaler)
+    
+    Raises:
+        FileNotFoundError: If model or scaler not found.
     """
+    model_path = model_path or MLConfig.MODEL_SAVE_PATH
+    scaler_path = scaler_path or MLConfig.SCALER_SAVE_PATH
+    
+    if not os.path.exists(model_path):
+        raise FileNotFoundError(
+            f"Model not found at {model_path}. "
+            "Run ml_engine.train_full_pipeline() first."
+        )
+    
+    if not os.path.exists(scaler_path):
+        raise FileNotFoundError(
+            f"Scaler not found at {scaler_path}. "
+            "Run ml_engine.train_full_pipeline() first."
+        )
+    
+    with open(model_path, "rb") as f:
+        model = pickle.load(f)
+    
+    with open(scaler_path, "rb") as f:
+        scaler = pickle.load(f)
+    
+    return model, scaler
+
+
+def get_top_features(
+    model: Any,
+    feature_names: List[str],
+    top_k: int = 5
+) -> List[Dict[str, Any]]:
+    """
+    Extract top K most important features from model.
+    
+    Args:
+        model: Trained logistic regression model.
+        feature_names: List of feature names.
+        top_k: Number of top features to return.
+    
+    Returns:
+        List of dicts with feature info and importance.
+    """
+    coefficients = model.coef_[0]
+    feature_importance = list(zip(feature_names, coefficients))
+    feature_importance_sorted = sorted(
+        feature_importance,
+        key=lambda x: abs(x[1]),
+        reverse=True
+    )
+    
+    top_features = []
+    for rank, (feature_name, coef) in enumerate(feature_importance_sorted[:top_k], 1):
+        direction = "increases_probability" if coef > 0 else "decreases_probability"
+        
+        top_features.append({
+            "rank": rank,
+            "feature": feature_name,
+            "coefficient": float(coef),
+            "importance_score": float(abs(coef)),
+            "direction": direction
+        })
+    
+    return top_features
+
+
+def get_risk_tier(success_probability: float) -> str:
+    """
+    Map success probability to risk tier.
+    
+    Args:
+        success_probability: Predicted probability (0-1).
+    
+    Returns:
+        Risk tier: "LOW", "MEDIUM", or "HIGH"
+    """
+    if success_probability >= MLConfig.RISK_THRESHOLDS["MEDIUM"]:
+        return "LOW"
+    elif success_probability >= MLConfig.RISK_THRESHOLDS["HIGH"]:
+        return "MEDIUM"
+    else:
+        return "HIGH"
+
+
+def predict_trial(input_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Predict trial success using trained logistic regression model.
+    
+    Complete prediction function that:
+    1. Engineers input features
+    2. Loads model and scaler
+    3. Generates probability prediction
+    4. Assigns risk tier
+    5. Extracts feature importance
+    6. Assesses confidence
+    7. Returns structured output
+    
+    Args:
+        input_dict: Raw trial data with all required fields.
+    
+    Returns:
+        Dictionary with:
+        - trial_success_probability (float)
+        - risk_tier (str)
+        - top_drivers (list of dicts)
+        - biomarker_explanation (str)
+        - confidence_flag (str)
+        - missing_biomarker_count (int)
+    """
+    # Engineer features
+    X_engineered, feature_names = engineer_features(input_dict)
+    
+    # Load model and scaler
+    try:
+        model, scaler = load_model_and_scaler()
+    except FileNotFoundError as e:
+        raise RuntimeError(f"Cannot load model: {e}")
+    
+    # Scale features
+    X_scaled = scaler.transform(X_engineered)
+    
+    # Predict probability
+    probability = float(model.predict_proba(X_scaled)[0, 1])
+    
+    # Get risk tier
+    risk_tier = get_risk_tier(probability)
+    
+    # Get top features
+    top_features = get_top_features(model, feature_names, top_k=5)
+    
+    # Calculate confidence
+    missing_count = sum(1 for field in MLConfig.REQUIRED_BIOMARKERS 
+                       if input_dict.get(field) is None)
+    
+    if missing_count == 0:
+        confidence = "HIGH"
+    elif missing_count <= 3:
+        confidence = "MEDIUM"
+    else:
+        confidence = "LOW"
+    
+    # Generate biomarker explanation
+    explanation = _generate_biomarker_explanation(input_dict, top_features, risk_tier)
+    
+    return {
+        "trial_success_probability": probability,
+        "risk_tier": risk_tier,
+        "top_drivers": top_features,
+        "biomarker_explanation": explanation,
+        "confidence_flag": confidence,
+        "missing_biomarker_count": missing_count,
+    }
+
+
+def _generate_biomarker_explanation(
+    input_dict: Dict[str, Any],
+    top_features: List[Dict],
+    risk_tier: str
+) -> str:
+    """
+    Generate plain-English explanation of biomarker influences.
+    
+    Args:
+        input_dict: Input trial data.
+        top_features: Top feature drivers.
+        risk_tier: Assessed risk tier.
+    
+    Returns:
+        Plain-English explanation string.
+    """
+    explanation = f"Trial classified as {risk_tier} risk. "
+    
+    positive_features = [f["feature"] for f in top_features if f["direction"] == "increases_probability"]
+    negative_features = [f["feature"] for f in top_features if f["direction"] == "decreases_probability"]
+    
+    if positive_features:
+        explanation += f"Positive drivers: {', '.join(positive_features[:2])}. "
+    
+    if negative_features:
+        explanation += f"Concerns: {', '.join(negative_features[:2])}. "
+    
+    explanation += "Review complete results for full feature analysis."
+    
+    return explanation
+
+
+# ====== RULE-BASED SCORING ======
+
+class TrialScorer:
+    """Rule-based scorer for trial success using deterministic biomarker weights."""
+    
+    def __init__(self, weights: RuleBasedWeights = None):
+        """
+        Initialize scorer.
+        
+        Args:
+            weights: RuleBasedWeights object. Uses defaults if None.
+        """
+        self.weights = weights or RuleBasedWeights()
+    
+    def score_trial(self, trial: Dict) -> Dict:
+        """
+        Score trial based on biomarkers and design features.
+        
+        Args:
+            trial: Trial data dict.
+        
+        Returns:
+            Dict with trial_success_probability, risk_tier, component_scores.
+        """
+        score = 0.50  # Neutral baseline
+        components = {}
+        
+        # ===== BIOMARKER SCORING =====
+        if self._safe_get(trial, "amyloid_pet_positive") == 1:
+            score += self.weights.AMYLOID_PET_POSITIVE
+            components["amyloid_pet_positive"] = self.weights.AMYLOID_PET_POSITIVE
+        
+        if self._safe_get(trial, "ptau217_high") == 1:
+            score += self.weights.PTAU217_HIGH
+            components["ptau217_high"] = self.weights.PTAU217_HIGH
+        
+        if self._safe_get(trial, "csf_abeta42_40_ratio_low") == 1:
+            score += self.weights.CSF_ABETA42_40_LOW
+            components["csf_abeta42_40_ratio_low"] = self.weights.CSF_ABETA42_40_LOW
+        
+        if self._safe_get(trial, "apoe_e4_carrier") == 1:
+            score += self.weights.APOE_E4_CARRIER
+            components["apoe_e4_carrier"] = self.weights.APOE_E4_CARRIER
+        
+        # ===== TRIAL DESIGN SCORING =====
+        trial_duration = self._safe_get(trial, "trial_duration_weeks", 0)
+        if trial_duration >= 52:
+            score += self.weights.LONG_DURATION_GE_52_WEEKS
+            components["long_duration"] = self.weights.LONG_DURATION_GE_52_WEEKS
+        elif trial_duration < 24:
+            score += self.weights.SHORT_DURATION_LT_24_WEEKS
+            components["short_duration_penalty"] = self.weights.SHORT_DURATION_LT_24_WEEKS
+        
+        sample_size = self._safe_get(trial, "trial_sample_size", 0)
+        if sample_size >= 250:
+            score += self.weights.ADEQUATE_SAMPLE_SIZE_GE_250
+            components["adequate_sample_size"] = self.weights.ADEQUATE_SAMPLE_SIZE_GE_250
+        elif sample_size < 100:
+            score += self.weights.SMALL_SAMPLE_LT_100
+            components["small_sample_penalty"] = self.weights.SMALL_SAMPLE_LT_100
+        
+        # ===== COGNITIVE STAGE SCORING =====
+        mmse = self._safe_get(trial, "baseline_mmse")
+        if mmse is not None:
+            if 18 <= mmse <= 26:
+                score += self.weights.BASELINE_MMSE_MCI_SWEET_SPOT
+                components["mmse_mci_sweet_spot"] = self.weights.BASELINE_MMSE_MCI_SWEET_SPOT
+            elif mmse < 10:
+                score += self.weights.VERY_ADVANCED_DEMENTIA_MMSE_LT_10
+                components["very_advanced_dementia_penalty"] = self.weights.VERY_ADVANCED_DEMENTIA_MMSE_LT_10
+        
+        # ===== ENRICHMENT STRATEGY =====
+        enrichment = self._safe_get(trial, "biomarker_enrichment_strategy", "").lower()
+        if "at_positive" in enrichment or enrichment == "at":
+            score += self.weights.ENRICHMENT_AT_POSITIVE
+            components["at_positive_enrichment"] = self.weights.ENRICHMENT_AT_POSITIVE
+        
+        # ===== AGE ADJUSTMENT =====
+        age = self._safe_get(trial, "age_mean")
+        if age is not None:
+            if 60 <= age <= 75:
+                score += self.weights.AGE_SWEET_SPOT_60_75
+                components["age_sweet_spot"] = self.weights.AGE_SWEET_SPOT_60_75
+        
+        # Normalize score to [0, 1]
+        final_probability = np.clip(score, 0.0, 1.0)
+        
+        # Determine risk tier
+        if final_probability >= 0.70:
+            risk_tier = "LOW"
+        elif final_probability >= 0.40:
+            risk_tier = "MEDIUM"
+        else:
+            risk_tier = "HIGH"
+        
+        return {
+            "trial_success_probability": float(final_probability),
+            "risk_tier": risk_tier,
+            "component_scores": components,
+        }
+    
+    @staticmethod
+    def _safe_get(trial: Dict, key: str, default=None):
+        """Safely get value from trial dict with None handling."""
+        value = trial.get(key, default)
+        if value is None or (isinstance(value, float) and np.isnan(value)):
+            return default
+        return value
+
+
+def score_trial_rule_based(trial: Dict) -> Dict:
+    """
+    Score a trial using rule-based approach.
+    
+    Convenience function that creates a scorer and scores the trial.
+    
+    Args:
+        trial: Trial data dictionary.
+    
+    Returns:
+        Scoring results dict.
+    """
+    scorer = TrialScorer()
+    return scorer.score_trial(trial)
+
+
+# ====== UTILITY FUNCTIONS ======
+
+def train_full_pipeline(data_path: str = None) -> Tuple[Dict, str]:
+    """
+    Complete training pipeline: load, prepare, train, evaluate, save.
+    
+    Args:
+        data_path: Path to training data (default: MLConfig.DATA_PATH).
+    
+    Returns:
+        Tuple of (evaluation_results dict, success_message string)
+    """
+    data_path = data_path or MLConfig.DATA_PATH
+    
     print("\n" + "=" * 80)
-    print("Model Comparison Summary")
+    print("GENIVRA ML ENGINE - FULL TRAINING PIPELINE")
     print("=" * 80)
     
-    # Prepare comparison data
-    comparison_data = {
-        "Metric": [
-            "Test Accuracy",
-            "Test ROC-AUC",
-            "CV Accuracy (mean)",
-            "CV Accuracy (std)",
-            "CV ROC-AUC (mean)",
-            "CV ROC-AUC (std)",
-        ],
-        "Logistic Regression": [
-            f"{lr_results['accuracy']:.4f}",
-            f"{lr_results['roc_auc']:.4f}",
-            f"{cv_results['logistic_regression']['accuracy_scores'].mean():.4f}",
-            f"{cv_results['logistic_regression']['accuracy_scores'].std():.4f}",
-            f"{cv_results['logistic_regression']['auc_scores'].mean():.4f}",
-            f"{cv_results['logistic_regression']['auc_scores'].std():.4f}",
-        ],
-        "Decision Tree (depth=4)": [
-            f"{dt_results['accuracy']:.4f}",
-            f"{dt_results['roc_auc']:.4f}",
-            f"{cv_results['decision_tree']['accuracy_scores'].mean():.4f}",
-            f"{cv_results['decision_tree']['accuracy_scores'].std():.4f}",
-            f"{cv_results['decision_tree']['auc_scores'].mean():.4f}",
-            f"{cv_results['decision_tree']['auc_scores'].std():.4f}",
-        ],
-    }
+    # Load and prepare
+    X, y, feature_names = load_and_prepare_data(data_path)
     
-    comparison_df = pd.DataFrame(comparison_data)
+    # Split
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=MLConfig.TEST_SIZE, random_state=MLConfig.RANDOM_STATE
+    )
     
-    print("\n" + comparison_df.to_string(index=False))
+    print(f"\n  ✓ Train/test split: {len(X_train)} / {len(X_test)}")
     
-    # Determine winner
-    print("\n" + "-" * 80)
-    lr_acc = lr_results['accuracy']
-    dt_acc = dt_results['accuracy']
+    # Train
+    model, scaler = train_model(X_train, y_train)
     
-    if lr_acc > dt_acc:
-        print(f"✓ Logistic Regression wins on test accuracy: {lr_acc:.4f} > {dt_acc:.4f}")
-    elif dt_acc > lr_acc:
-        print(f"✓ Decision Tree wins on test accuracy: {dt_acc:.4f} > {lr_acc:.4f}")
-    else:
-        print(f"✓ Tie: Both models achieve {lr_acc:.4f} accuracy")
+    # Evaluate
+    eval_results = evaluate_model(model, scaler, X_test, y_test, feature_names)
     
-    lr_auc = lr_results['roc_auc']
-    dt_auc = dt_results['roc_auc']
-    
-    if lr_auc > dt_auc:
-        print(f"✓ Logistic Regression wins on test AUC: {lr_auc:.4f} > {dt_auc:.4f}")
-    elif dt_auc > lr_auc:
-        print(f"✓ Decision Tree wins on test AUC: {dt_auc:.4f} > {lr_auc:.4f}")
-    else:
-        print(f"✓ Tie: Both models achieve {lr_auc:.4f} AUC")
+    # Save
+    save_model(model, scaler)
     
     print("\n" + "=" * 80)
+    print("TRAINING COMPLETE")
+    print("=" * 80)
     
-    # Feature importance comparison
-    print("\nTop 10 Important Features - Logistic Regression:")
-    print("-" * 80)
-    lr_top = lr_results['feature_importance'].head(10)[['rank', 'feature', 'coefficient']]
-    for idx, row in lr_top.iterrows():
-        print(f"  {int(row['rank']):2d}. {row['feature']:40s} {row['coefficient']:8.4f}")
-    
-    print("\nTop 10 Important Features - Decision Tree:")
-    print("-" * 80)
-    dt_top = dt_results['feature_importance'].head(10)[['rank', 'feature', 'importance']]
-    for idx, row in dt_top.iterrows():
-        print(f"  {int(row['rank']):2d}. {row['feature']:40s} {row['importance']:.4f}")
-    
-    print("\n" + "=" * 80)
+    return eval_results, "Training pipeline completed successfully."
 
+
+# ====== INITIALIZATION ======
 
 if __name__ == "__main__":
-    models, scaler, cv_results = main()
+    # Test the engine
+    print("Genivra ML Engine loaded successfully")
+    print(f"Model path: {MLConfig.MODEL_SAVE_PATH}")
+    print(f"Scaler path: {MLConfig.SCALER_SAVE_PATH}")
