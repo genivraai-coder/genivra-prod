@@ -904,40 +904,8 @@
             document.getElementById('submitBtn').disabled = true;
 
             try {
-                // Build request payload
-                const payload = {
-                    phase: document.getElementById('phase').value,
-                    indication: document.getElementById('indication').value,
-                    trial_design: {
-                        phase: document.getElementById('phase').value,
-                        indication: document.getElementById('indication').value,
-                        trial_sample_size: parseInt(document.getElementById('trialSampleSize').value),
-                        trial_duration_weeks: parseInt(document.getElementById('trialDuration').value),
-                        number_of_arms: parseInt(document.getElementById('numberOfArms').value),
-                        randomization_ratio: document.getElementById('randomizationRatio').value,
-                    },
-                    endpoints: {
-                        endpoint_type: document.getElementById('endpointType').value,
-                        primary_endpoint_name: document.getElementById('primaryEndpointName').value,
-                    },
-                    biomarkers: {
-                        apoe_e4_carrier: document.getElementById('apoeCarrier').checked ? 1 : null,
-                        apoe_e4_homozygous: document.getElementById('apoeHomozygous').checked ? 1 : null,
-                        ptau217_high: document.getElementById('ptau217High').checked ? 1 : null,
-                        csf_abeta42_40_ratio_low: document.getElementById('csfAb42Low').checked ? 1 : null,
-                        csf_ptau_elevated: document.getElementById('csfPtauElevated').checked ? 1 : null,
-                        amyloid_pet_positive: document.getElementById('amyloidPetPositive').checked ? 1 : null,
-                        tau_pet_positive: document.getElementById('tauPetPositive').checked ? 1 : null,
-                        hippocampal_atrophy_binary: document.getElementById('hippocampalAtrophy').checked ? 1 : null,
-                    },
-                    enrollment: {
-                        age_mean: parseFloat(document.getElementById('ageMean').value),
-                        baseline_mmse: document.getElementById('mmseBaseline').value ? parseFloat(document.getElementById('mmseBaseline').value) : null,
-                        baseline_moca: document.getElementById('mocaBaseline').value ? parseFloat(document.getElementById('mocaBaseline').value) : null,
-                        cdr_baseline: document.getElementById('cdrBaseline').value ? parseFloat(document.getElementById('cdrBaseline').value) : null,
-                    },
-                    biomarker_enrichment_strategy: document.getElementById('enrichmentStrategy').value,
-                };
+                // Build request payload using utility function
+                const payload = buildTrialFromForm();
 
                 // Send request
                 const response = await fetch(`${API_BASE_URL}/predict`, {
@@ -964,6 +932,28 @@
             } finally {
                 document.getElementById('submitBtn').disabled = false;
             }
+        }
+
+        // ====== DISPLAY PREDICTION (UNIFIED FUNCTION) ======
+        /**
+         * Unified function to display prediction results on the dashboard.
+         * Maps API response fields to UI elements.
+         * 
+         * @param {Object} result - API response object containing prediction data
+         * @param {number} result.trial_success_probability - Probability (0-1) of trial success
+         * @param {string} result.risk_tier - Risk classification (LOW, MEDIUM, HIGH)
+         * @param {Array} result.top_drivers - Feature drivers with impact_magnitude
+         * @param {string} result.biomarker_explanation - Text explanation of biomarkers
+         * @param {string} result.confidence_flag - Confidence level (HIGH, MEDIUM, LOW)
+         */
+        function displayPrediction(result) {
+            document.getElementById('probability').innerText = `Success Probability: ${(result.trial_success_probability * 100).toFixed(1)}%`;
+            document.getElementById('risk_tier').innerText = `Risk Tier: ${result.risk_tier || 'UNKNOWN'}`;
+            document.getElementById('top_drivers').innerText = `Top Drivers: ${(result.top_drivers || []).slice(0, 3).map(d => d.feature_name).join(', ')}`;
+            document.getElementById('biomarker_explanation').innerText = `Biomarker Evidence: ${result.biomarker_explanation || 'No explanation available'}`;
+            document.getElementById('confidence').innerText = `Confidence: ${result.confidence_flag || 'UNKNOWN'}`;
+            document.getElementById('resultsSection').classList.add('show');
+            document.getElementById('resultsSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         }
 
         // ====== DISPLAY SINGLE RESULT ======
@@ -1166,6 +1156,156 @@
 
             document.getElementById('batchResultsSection').classList.add('show');
             document.getElementById('batchResultsSection').scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        }
+
+        // ====== BUILD TRIAL OBJECT FROM FORM ======
+        /**
+         * Convert single trial form inputs into a trial object
+         * Useful for building trial arrays programmatically
+         * 
+         * @returns {Object} Trial object with all required fields
+         */
+        function buildTrialFromForm() {
+            return {
+                phase: document.getElementById('phase').value,
+                indication: document.getElementById('indication').value,
+                trial_design: {
+                    phase: document.getElementById('phase').value,
+                    indication: document.getElementById('indication').value,
+                    trial_sample_size: parseInt(document.getElementById('trialSampleSize').value),
+                    trial_duration_weeks: parseInt(document.getElementById('trialDuration').value),
+                    number_of_arms: parseInt(document.getElementById('numberOfArms').value),
+                    randomization_ratio: document.getElementById('randomizationRatio').value,
+                },
+                endpoints: {
+                    endpoint_type: document.getElementById('endpointType').value,
+                    primary_endpoint_name: document.getElementById('primaryEndpointName').value,
+                },
+                biomarkers: {
+                    apoe_e4_carrier: document.getElementById('apoeCarrier').checked ? 1 : null,
+                    apoe_e4_homozygous: document.getElementById('apoeHomozygous').checked ? 1 : null,
+                    ptau217_high: document.getElementById('ptau217High').checked ? 1 : null,
+                    csf_abeta42_40_ratio_low: document.getElementById('csfAb42Low').checked ? 1 : null,
+                    csf_ptau_elevated: document.getElementById('csfPtauElevated').checked ? 1 : null,
+                    amyloid_pet_positive: document.getElementById('amyloidPetPositive').checked ? 1 : null,
+                    tau_pet_positive: document.getElementById('tauPetPositive').checked ? 1 : null,
+                    hippocampal_atrophy_binary: document.getElementById('hippocampalAtrophy').checked ? 1 : null,
+                },
+                enrollment: {
+                    age_mean: parseFloat(document.getElementById('ageMean').value),
+                    baseline_mmse: document.getElementById('mmseBaseline').value ? parseFloat(document.getElementById('mmseBaseline').value) : null,
+                    baseline_moca: document.getElementById('mocaBaseline').value ? parseFloat(document.getElementById('mocaBaseline').value) : null,
+                    cdr_baseline: document.getElementById('cdrBaseline').value ? parseFloat(document.getElementById('cdrBaseline').value) : null,
+                },
+                biomarker_enrichment_strategy: document.getElementById('enrichmentStrategy').value,
+            };
+        }
+
+        // ====== PARSE CSV TO JSON ======
+        /**
+         * Parse CSV text into array of trial objects
+         * Handles headers from first row and converts to JSON
+         * 
+         * @param {string} csvText - Raw CSV content
+         * @returns {Array} Array of trial objects with properties from CSV columns
+         */
+        function parseCSV(csvText) {
+            const lines = csvText.trim().split('\n');
+            if (lines.length < 2) return [];
+
+            // Parse header row
+            const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/"/g, ''));
+            
+            // Parse data rows
+            const trials = lines.slice(1).filter(line => line.trim()).map((line, idx) => {
+                const values = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''));
+                const trial = { row_number: idx + 1 };
+                
+                headers.forEach((header, i) => {
+                    let value = values[i] || null;
+                    
+                    // Auto-convert numeric fields
+                    if (['age_mean', 'baseline_mmse', 'baseline_moca', 'cdr_baseline', 
+                         'trial_sample_size', 'trial_duration_weeks', 'number_of_arms'].includes(header)) {
+                        trial[header] = value ? parseFloat(value) : null;
+                    } 
+                    // Convert boolean/checkbox fields
+                    else if (['apoe_e4_carrier', 'apoe_e4_homozygous', 'ptau217_high', 
+                              'csf_abeta42_40_ratio_low', 'csf_ptau_elevated', 
+                              'amyloid_pet_positive', 'tau_pet_positive', 'hippocampal_atrophy_binary'].includes(header)) {
+                        trial[header] = (value && ['1', 'true', 'yes', 'y'].includes(value.toLowerCase())) ? 1 : null;
+                    }
+                    else {
+                        trial[header] = value || null;
+                    }
+                });
+                
+                return trial;
+            });
+
+            return trials;
+        }
+
+        // ====== SUBMIT BATCH WITH JSON ======
+        /**
+         * Alternative batch submission using CSV parser + JSON POST
+         * Parses CSV file and sends trials as JSON array
+         * 
+         * Usage: Call this instead of submitBatchPrediction() to use JSON-based approach
+         */
+        async function submitBatchTrialsJSON() {
+            if (!selectedFile) {
+                showStatus('❌ Please select a CSV file', 'error');
+                return;
+            }
+
+            const apiKey = document.getElementById('apiKey').value.trim();
+            if (!apiKey) {
+                showStatus('❌ Please enter an API key', 'error');
+                return;
+            }
+
+            showStatus('⏳ Parsing CSV and sending trials...', 'loading');
+            document.getElementById('submitBatchBtn').disabled = true;
+
+            try {
+                // Read CSV file as text
+                const csvText = await selectedFile.text();
+                
+                // Parse CSV to trial objects
+                const trials = parseCSV(csvText);
+                if (trials.length === 0) {
+                    throw new Error('No valid trial data found in CSV');
+                }
+
+                // Structure trials into required format
+                const payload = { trials };
+
+                // Send JSON to API
+                const response = await fetch(`${API_BASE_URL}/predict_batch_json`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'x-api-key': apiKey,
+                    },
+                    body: JSON.stringify(payload),
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || `HTTP ${response.status}`);
+                }
+
+                const result = await response.json();
+                displayBatchResults(result);
+                showStatus(`✅ Processed ${result.total_rows} rows - ${result.successful} successful, ${result.failed} failed`, 'success');
+
+            } catch (error) {
+                showStatus(`❌ Error: ${error.message}`, 'error');
+                console.error(error);
+            } finally {
+                document.getElementById('submitBatchBtn').disabled = false;
+            }
         }
 
         // ====== DOWNLOAD BATCH RESULTS ======
