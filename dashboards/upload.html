@@ -5,192 +5,540 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Genivra - Batch CSV Upload</title>
   <style>
-    body { font-family: Arial, sans-serif; margin: 24px; }
-    .container { max-width: 900px; margin: auto; }
-    h1 { margin-bottom: 8px; }
-    form { margin-bottom: 16px; }
-    table { width: 100%; border-collapse: collapse; margin-top: 12px; }
-    th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-    th { background: #f4f4f4; }
-    .status { margin-top: 8px; }
-    .error { color: red; }
-    .btn { padding: 8px 12px; cursor: pointer; border-radius: 4px; border: 1px solid #888; background: #fff; }
-    .btn-primary { background: #0b79ff; color: #fff; border-color: #0b79ff; }
+    :root {
+      --bg-primary: #0a0a0f;
+      --bg-secondary: #0f0f1a;
+      --text-primary: #ffffff;
+      --text-secondary: #a1a1aa;
+      --text-muted: #71717a;
+      --accent-cyan: #00d4ff;
+      --border-color: rgba(255, 255, 255, 0.1);
+      --gradient-main: linear-gradient(135deg, #00d4ff 0%, #8b5cf6 50%, #ec4899 100%);
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+      color: var(--text-primary);
+      padding: 40px 24px;
+      min-height: 100vh;
+    }
+
+    .container {
+      max-width: 900px;
+      margin: 0 auto;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 12px;
+      background: var(--gradient-main);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    .subtitle {
+      color: var(--text-secondary);
+      margin-bottom: 32px;
+      font-size: 1.05rem;
+    }
+
+    .form-card {
+      background: rgba(15, 15, 26, 0.9);
+      border: 1px solid var(--border-color);
+      border-radius: 12px;
+      padding: 28px;
+      margin-bottom: 32px;
+      backdrop-filter: blur(10px);
+    }
+
+    .api-key-group {
+      margin-bottom: 24px;
+      padding: 16px;
+      background: rgba(0, 212, 255, 0.05);
+      border: 1px solid var(--accent-cyan);
+      border-radius: 8px;
+    }
+
+    .api-key-group label {
+      display: block;
+      font-weight: 600;
+      margin-bottom: 10px;
+      color: var(--text-primary);
+    }
+
+    .api-key-input-group {
+      display: flex;
+      gap: 12px;
+    }
+
+    .api-key-input-group input {
+      flex: 1;
+    }
+
+    label {
+      display: block;
+      margin: 16px 0 8px 0;
+      font-weight: 500;
+      color: var(--text-secondary);
+    }
+
+    input[type="file"],
+    input[type="password"] {
+      width: 100%;
+      padding: 12px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid var(--border-color);
+      border-radius: 8px;
+      color: var(--text-primary);
+      font-size: 14px;
+      transition: all 0.3s ease;
+    }
+
+    input[type="file"]:focus,
+    input[type="password"]:focus {
+      outline: none;
+      background: rgba(255, 255, 255, 0.08);
+      border-color: var(--accent-cyan);
+      box-shadow: 0 0 0 3px rgba(0, 212, 255, 0.1);
+    }
+
+    .status {
+      margin: 16px 0;
+      padding: 12px;
+      border-radius: 8px;
+      display: none;
+    }
+
+    .status.show {
+      display: block;
+    }
+
+    .status.loading {
+      background: rgba(0, 212, 255, 0.1);
+      border: 1px solid var(--accent-cyan);
+      color: var(--accent-cyan);
+    }
+
+    .status.error {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid var(--danger);
+      color: var(--danger);
+    }
+
+    .status.success {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid var(--success);
+      color: var(--success);
+    }
+
+    .btn {
+      padding: 12px 24px;
+      cursor: pointer;
+      border-radius: 8px;
+      border: none;
+      font-weight: 500;
+      font-size: 14px;
+      transition: all 0.3s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .btn-primary {
+      background: var(--gradient-main);
+      color: white;
+      box-shadow: 0 4px 20px rgba(0, 212, 255, 0.3);
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 30px rgba(0, 212, 255, 0.4);
+    }
+
+    .btn-primary:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .btn-secondary {
+      background: transparent;
+      border: 1px solid var(--border-color);
+      color: var(--text-primary);
+    }
+
+    .btn-secondary:hover {
+      background: rgba(255, 255, 255, 0.05);
+      border-color: rgba(255, 255, 255, 0.2);
+    }
+
+    .button-group {
+      display: flex;
+      gap: 12px;
+      margin-top: 16px;
+      flex-wrap: wrap;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 14px;
+      margin-top: 16px;
+    }
+
+    th, td {
+      border: 1px solid var(--border-color);
+      padding: 12px;
+      text-align: left;
+    }
+
+    th {
+      background: rgba(255, 255, 255, 0.03);
+      font-weight: 600;
+      color: var(--accent-cyan);
+    }
+
+    tr:hover {
+      background: rgba(255, 255, 255, 0.02);
+    }
+
+    #resultsArea {
+      display: none;
+    }
+
+    #resultsArea.show {
+      display: block;
+    }
+
+    .results-stats {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 12px;
+      margin-bottom: 16px;
+    }
+
+    .stat-box {
+      background: rgba(255, 255, 255, 0.02);
+      border: 1px solid var(--border-color);
+      padding: 16px;
+      border-radius: 8px;
+      text-align: center;
+    }
+
+    .stat-label {
+      font-size: 12px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    .stat-value {
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--accent-cyan);
+    }
   </style>
 </head>
 <body>
   <div class="container">
-    <h1>Upload Trial CSV for Predictions</h1>
-    <p>Upload a CSV file where the header row contains field names (e.g. phase, indication, trial_sample_size, baseline_mmse, apoe_e4_carrier, etc.). Each row will be sent to the `/predict` endpoint and the returned results will be displayed.</p>
+    <h1>🚀 Batch Prediction Upload</h1>
+    <p class="subtitle">Upload a CSV file with multiple trials for batch processing</p>
 
-    <form id="uploadForm">
-      <label for="csvFile">Select CSV file (max 5 MB):</label>
-      <input type="file" id="csvFile" name="csvFile" accept=".csv" />
-      <button type="submit" class="btn btn-primary">Upload & Predict</button>
-    </form>
+    <div class="form-card">
+      <!-- API Key Section -->
+      <div class="api-key-group">
+        <label for="apiKey">API Key (Required)</label>
+        <div class="api-key-input-group">
+          <input 
+            type="password" 
+            id="apiKey" 
+            placeholder="Enter your API key"
+            value="demo_tier1_key_12345"
+          />
+          <button type="button" class="btn btn-secondary" onclick="toggleApiKeyVisibility()">Show</button>
+        </div>
+        <div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">
+          📝 Demo Keys: <code>demo_tier1_key_12345</code> (100/month) | <code>demo_tier2_key_67890</code> (unlimited)
+        </div>
+      </div>
 
-    <div class="status" id="status"></div>
+      <!-- File Upload Section -->
+      <form id="uploadForm">
+        <label for="csvFile"><strong>Select CSV File</strong></label>
+        <p style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">
+          Required columns: trial_sample_size, trial_duration_weeks, endpoint_type, primary_endpoint_name, age_mean
+        </p>
+        <input type="file" id="csvFile" name="csvFile" accept=".csv" required />
+        
+        <div class="button-group">
+          <button type="submit" class="btn btn-primary" id="submitBtn">
+            <span>📦</span>
+            <span>Upload & Process</span>
+          </button>
+          <button type="button" class="btn btn-secondary" onclick="resetForm()">Clear</button>
+        </div>
+      </form>
 
-    <div id="resultsArea" style="display:none">
-      <button id="downloadBtn" class="btn">Download CSV</button>
+      <div class="status" id="status"></div>
+    </div>
+
+    <div id="resultsArea" class="form-card">
+      <h2 style="margin-bottom: 20px; color: var(--accent-cyan);">Batch Results</h2>
+      
+      <div class="results-stats">
+        <div class="stat-box">
+          <div class="stat-label">Total</div>
+          <div class="stat-value" id="totalCount">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Successful</div>
+          <div class="stat-value" style="color: var(--success);" id="successCount">0</div>
+        </div>
+        <div class="stat-box">
+          <div class="stat-label">Failed</div>
+          <div class="stat-value" style="color: var(--danger);" id="failCount">0</div>
+        </div>
+      </div>
+
       <table id="resultsTable" aria-live="polite">
         <thead>
           <tr>
             <th>#</th>
+            <th>Trial Name</th>
+            <th>Success</th>
             <th>Probability</th>
             <th>Risk Tier</th>
-            <th>Top Drivers</th>
-            <th>Biomarker Explanation</th>
             <th>Confidence</th>
+            <th>Error</th>
           </tr>
         </thead>
         <tbody></tbody>
       </table>
+
+      <div class="button-group">
+        <button id="downloadBtn" class="btn btn-secondary" onclick="downloadCSV()">⬇️ Download Results</button>
+      </div>
     </div>
   </div>
 
   <script>
-    const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5 MB
+    const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
+    const API_BASE_URL = ''; // Relative URL (same domain)
+    
     const uploadForm = document.getElementById('uploadForm');
     const csvInput = document.getElementById('csvFile');
     const statusDiv = document.getElementById('status');
     const resultsArea = document.getElementById('resultsArea');
     const resultsTableBody = document.querySelector('#resultsTable tbody');
-    const downloadBtn = document.getElementById('downloadBtn');
+    const submitBtn = document.getElementById('submitBtn');
 
-    function setStatus(message, isError = false) {
-      statusDiv.textContent = message;
-      statusDiv.className = isError ? 'status error' : 'status';
+    let lastResults = [];
+
+    // ====== API KEY VISIBILITY ======
+    function toggleApiKeyVisibility() {
+      const apiKeyInput = document.getElementById('apiKey');
+      if (apiKeyInput.type === 'password') {
+        apiKeyInput.type = 'text';
+        event.target.textContent = 'Hide';
+      } else {
+        apiKeyInput.type = 'password';
+        event.target.textContent = 'Show';
+      }
     }
 
+    // ====== STATUS MESSAGES ======
+    function setStatus(message, type = 'info') {
+      statusDiv.textContent = message;
+      statusDiv.className = `status show ${type}`;
+    }
+
+    function clearStatus() {
+      statusDiv.className = 'status';
+      statusDiv.textContent = '';
+    }
+
+    // ====== CSV PARSING ======
     function parseCSV(text) {
-      // Basic CSV parser (no advanced quoting support)
       const lines = text.trim().split(/\r?\n/).filter(l => l.trim().length > 0);
       if (lines.length === 0) return [];
+      
       const headers = lines[0].split(',').map(h => h.trim());
       const rows = [];
+      
       for (let i = 1; i < lines.length; i++) {
-        const parts = lines[i].split(',');
+        const parts = lines[i].split(',').map(p => p.trim());
         const row = {};
         for (let j = 0; j < headers.length; j++) {
-          row[headers[j]] = parts[j] !== undefined ? parts[j].trim() : '';
+          row[headers[j]] = parts[j] || '';
         }
         rows.push(row);
       }
+      
       return rows;
     }
 
-    async function postPrediction(payload) {
-      // POST to /predict endpoint; adjust origin/path if API is hosted elsewhere
-      try {
-        const resp = await fetch('/predict', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(payload),
-        });
-        const data = await resp.json();
-        if (!resp.ok) throw new Error(data.error || JSON.stringify(data));
-        return data;
-      } catch (err) {
-        return { __error: true, message: err.message };
-      }
-    }
-
-    function renderResults(results) {
+    // ====== FORM SUBMISSION ======
+    uploadForm.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      clearStatus();
+      resultsArea.classList.remove('show');
       resultsTableBody.innerHTML = '';
-      results.forEach((r, idx) => {
+
+      const file = csvInput.files[0];
+      const apiKey = document.getElementById('apiKey').value.trim();
+
+      // Validation
+      if (!apiKey) {
+        setStatus('❌ Please enter an API key', 'error');
+        return;
+      }
+
+      if (!file) {
+        setStatus('❌ Please choose a CSV file', 'error');
+        return;
+      }
+
+      if (!file.name.toLowerCase().endsWith('.csv')) {
+        setStatus('❌ Only CSV files are accepted', 'error');
+        return;
+      }
+
+      if (file.size > MAX_FILE_SIZE) {
+        setStatus(`❌ File too large. Maximum ${MAX_FILE_SIZE / 1024 / 1024} MB allowed`, 'error');
+        return;
+      }
+
+      submitBtn.disabled = true;
+      setStatus('⏳ Reading file...', 'loading');
+
+      try {
+        const text = await file.text();
+        const rows = parseCSV(text);
+
+        if (rows.length === 0) {
+          setStatus('❌ CSV contains no data', 'error');
+          return;
+        }
+
+        setStatus(`⏳ Processing ${rows.length} trials via /predict_batch endpoint...`, 'loading');
+
+        // Use the batch endpoint for better performance
+        const formData = new FormData();
+        formData.append('file', file);
+
+        const response = await fetch(`${API_BASE_URL}/predict_batch`, {
+          method: 'POST',
+          headers: {
+            'x-api-key': apiKey,
+          },
+          body: formData,
+        });
+
+        if (!response.ok) {
+          const error = await response.json();
+          throw new Error(error.detail || `HTTP ${response.status}`);
+        }
+
+        const result = await response.json();
+        lastResults = result.results || [];
+
+        displayResults(result);
+        setStatus(`✅ Completed: ${result.total_rows} total, ${result.successful} successful, ${result.failed} failed`, 'success');
+
+      } catch (err) {
+        setStatus(`❌ Error: ${err.message}`, 'error');
+        console.error(err);
+      } finally {
+        submitBtn.disabled = false;
+      }
+    });
+
+    // ====== DISPLAY RESULTS ======
+    function displayResults(result) {
+      document.getElementById('totalCount').textContent = result.total_rows;
+      document.getElementById('successCount').textContent = result.successful;
+      document.getElementById('failCount').textContent = result.failed;
+
+      resultsTableBody.innerHTML = '';
+
+      (result.results || []).forEach((row) => {
         const tr = document.createElement('tr');
-        const prob = r.probability_of_success !== undefined && r.probability_of_success !== null ? Number(r.probability_of_success).toFixed(3) : '';
-        const drivers = r.top_drivers ? (Array.isArray(r.top_drivers) ? r.top_drivers.map(d => d.feature || d.feature_name || JSON.stringify(d)).join('; ') : JSON.stringify(r.top_drivers)) : '';
+        
+        const riskTierClass = row.risk_tier?.toUpperCase() === 'HIGH' ? 'style="color: #ef4444; font-weight: 500;"' :
+                             row.risk_tier?.toUpperCase() === 'MEDIUM' ? 'style="color: #f59e0b; font-weight: 500;"' :
+                             'style="color: #10b981; font-weight: 500;"';
+
+        const confidenceClass = row.confidence_flag?.toUpperCase() === 'HIGH' ? 'style="color: #10b981;"' :
+                               row.confidence_flag?.toUpperCase() === 'MEDIUM' ? 'style="color: #f59e0b;"' :
+                               'style="color: #ef4444;"';
+
         tr.innerHTML = `
-          <td>${idx+1}</td>
-          <td>${prob}</td>
-          <td>${r.risk_tier || ''}</td>
-          <td>${drivers}</td>
-          <td>${r.biomarker_explanation || ''}</td>
-          <td>${r.confidence_flag || ''}</td>
+          <td>${row.row_number}</td>
+          <td>${row.trial_name || '—'}</td>
+          <td>${row.success ? '✅' : '❌'}</td>
+          <td>${row.trial_success_probability !== null ? (row.trial_success_probability * 100).toFixed(1) + '%' : '—'}</td>
+          <td ${riskTierClass}>${row.risk_tier || '—'}</td>
+          <td ${confidenceClass}>${row.confidence_flag || '—'}</td>
+          <td style="color: #ef4444; font-size: 12px;">${row.error_message || '✓'}</td>
         `;
         resultsTableBody.appendChild(tr);
       });
-      resultsArea.style.display = results.length ? 'block' : 'none';
+
+      resultsArea.classList.add('show');
+      resultsArea.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
 
-    function resultsToCSV(results) {
-      const header = ['index','probability_of_success','risk_tier','top_drivers','biomarker_explanation','confidence_flag'];
-      const lines = [header.join(',')];
-      results.forEach((r, idx) => {
-        const drivers = r.top_drivers ? (Array.isArray(r.top_drivers) ? r.top_drivers.map(d => d.feature || d.feature_name || '').join('; ') : '') : '';
-        const row = [
-          idx+1,
-          r.probability_of_success !== undefined && r.probability_of_success !== null ? r.probability_of_success : '',
-          r.risk_tier || '',
-          '"' + drivers.replace(/"/g,'""') + '"',
-          '"' + (r.biomarker_explanation || '').replace(/"/g,'""') + '"',
-          r.confidence_flag || ''
-        ];
-        lines.push(row.join(','));
-      });
-      return lines.join('\n');
-    }
-
-    downloadBtn.addEventListener('click', () => {
-      const rows = Array.from(resultsTableBody.querySelectorAll('tr')).map(tr => {
-        const cells = Array.from(tr.children).map(td => td.textContent);
-        return cells;
-      });
-      // Reconstruct results from table for download
-      // Simpler: re-use lastResults if available
-      if (!window.lastResults || window.lastResults.length === 0) {
-        setStatus('No results to download', true);
+    // ====== DOWNLOAD RESULTS ======
+    function downloadCSV() {
+      if (lastResults.length === 0) {
+        setStatus('❌ No results to download', 'error');
         return;
       }
-      const csv = resultsToCSV(window.lastResults);
+
+      const headers = ['row_number', 'trial_name', 'success', 'probability', 'risk_tier', 'confidence', 'error'];
+      const rows = lastResults.map(r => [
+        r.row_number,
+        r.trial_name || '',
+        r.success ? 'true' : 'false',
+        r.trial_success_probability !== null ? r.trial_success_probability.toFixed(4) : '',
+        r.risk_tier || '',
+        r.confidence_flag || '',
+        r.error_message || ''
+      ]);
+
+      const csv = [
+        headers.join(','),
+        ...rows.map(row => row.map(cell => `"${cell}"`).join(','))
+      ].join('\n');
+
       const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'predictions_results.csv';
-      document.body.appendChild(a);
-      a.click();
-      document.body.removeChild(a);
-      URL.revokeObjectURL(url);
-    });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(blob);
+      link.download = `genivra_batch_results_${new Date().getTime()}.csv`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+    }
 
-    uploadForm.addEventListener('submit', async (e) => {
-      e.preventDefault();
-      setStatus('');
-      resultsArea.style.display = 'none';
+    // ====== FORM RESET ======
+    function resetForm() {
+      uploadForm.reset();
+      resultsArea.classList.remove('show');
       resultsTableBody.innerHTML = '';
-      const file = csvInput.files[0];
-      if (!file) { setStatus('Please choose a CSV file to upload.', true); return; }
-      if (!file.name.toLowerCase().endsWith('.csv')) { setStatus('Only CSV files are accepted.', true); return; }
-      if (file.size > MAX_FILE_SIZE) { setStatus('File too large. Maximum 5 MB allowed.', true); return; }
-
-      setStatus('Reading file...');
-      const text = await file.text();
-      const rows = parseCSV(text);
-      if (rows.length === 0) { setStatus('CSV contains no data or header not found.', true); return; }
-
-      setStatus(`Sending ${rows.length} rows to /predict...`);
-      const results = [];
-      for (let i = 0; i < rows.length; i++) {
-        setStatus(`Processing row ${i+1} of ${rows.length}...`);
-        const payload = rows[i];
-        // Optionally nest fields into trial_design/enrollment/biomarkers based on header prefixes
-        // For now, send the flat object and let server handle fields
-        const res = await postPrediction(payload);
-        if (res && res.__error) {
-          // Capture error for this row, but continue
-          results.push({ probability_of_success: null, risk_tier: 'ERROR', top_drivers: [], biomarker_explanation: res.message, confidence_flag: '' });
-        } else {
-          results.push(res);
-        }
-      }
-
-      window.lastResults = results;
-      renderResults(results);
-      setStatus(`Completed ${rows.length} rows.`);
-    });
+      clearStatus();
+      lastResults = [];
+    }
   </script>
 </body>
 </html>
