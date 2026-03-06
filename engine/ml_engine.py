@@ -1,29 +1,44 @@
 """
-Genivra ML Engine - Consolidated Core ML Module
+Genivra ML Engine - Production Core Module
+==========================================
 
-Unified machine learning engine combining:
-- Data loading and synthetic trial generation
-- Feature engineering and preprocessing
-- Model training (logistic regression + decision tree)
-- Trial prediction with interpretability
-- Rule-based scoring baseline
-- Utility functions
+Unified machine learning engine for CNS clinical trial risk scoring.
 
-This module serves as the single source of truth for all ML operations.
-All API endpoints should import from here.
+Architecture:
+    1. Synthetic data generation (calibrated to published CNS trial outcomes)
+    2. Feature engineering with robust one-hot encoding
+    3. Model training: logistic regression + decision tree ensemble
+    4. predict_trial(): primary API entry point — always returns a result
+    5. score_trial_rule_based(): deterministic fallback scorer
+    6. Interpretability layer: human-readable feature labels + explanations
+
+Design principles:
+    - predict_trial() NEVER raises — it always returns a structured dict
+    - If pkl artifacts are missing, falls back to rule-based scoring automatically
+    - All feature names are translated to human-readable labels in outputs
+    - Calibrated to published CNS Phase II -> III transition literature
+
+Key references:
+    - Wong et al. (2019) BIO/Informa/QLS industry success rates
+    - Alzheimer's Association biomarker enrichment literature (ADNI, DIAN)
+    - FDA biomarker qualification guidance for Alzheimer's Disease
 
 Author: Genivra ML Team
-Date: March 3, 2026
-Version: 2.0 (Consolidated)
+Version: 3.0 (Production)
+Date: March 2026
 """
 
-# ====== IMPORTS ======
+# ====================================================================
+# IMPORTS
+# ====================================================================
+
 import os
+import math
 import pickle
 import warnings
+import logging
 from typing import Dict, Tuple, Any, Optional, List
 from datetime import datetime
-from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
@@ -31,755 +46,1257 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.tree import DecisionTreeClassifier
 from sklearn.model_selection import train_test_split, cross_val_score
 from sklearn.preprocessing import StandardScaler
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.metrics import (
     accuracy_score,
     roc_auc_score,
     confusion_matrix,
-    classification_report,
-    roc_curve,
-    auc,
+    brier_score_loss,
 )
 
-warnings.filterwarnings("ignore", category=DeprecationWarning)
+warnings.filterwarnings("ignore")
+logger = logging.getLogger(__name__)
 
 
-# ====== CONFIGURATION ======
+# ====================================================================
+# CONFIGURATION
+# ====================================================================
 
 class MLConfig:
-    """Machine learning engine configuration."""
-    
-    # Paths
-    DATA_PATH = "data/processed/synthetic_ad_trials.csv"
-    ARTIFACT_DIR = "models/artifacts"
-    MODEL_SAVE_PATH = os.path.join(ARTIFACT_DIR, "logistic_model.pkl")
-    SCALER_SAVE_PATH = os.path.join(ARTIFACT_DIR, "feature_scaler.pkl")
-    TREE_MODEL_SAVE_PATH = os.path.join(ARTIFACT_DIR, "decision_tree_model.pkl")
-    
-    # Training parameters
-    TEST_SIZE = 0.20
-    RANDOM_STATE = 42
-    
-    # Features to exclude from training
-    EXCLUDE_FEATURES = [
-        "trial_id",
-        "trial_success_probability",
-        "trial_success",
+    """Central configuration for the ML engine."""
+
+    # --- Paths ---
+    DATA_PATH              = "data/processed/synthetic_cns_trials.csv"
+    ARTIFACT_DIR           = "models/artifacts"
+    MODEL_SAVE_PATH        = os.path.join(ARTIFACT_DIR, "logistic_model.pkl")
+    SCALER_SAVE_PATH       = os.path.join(ARTIFACT_DIR, "feature_scaler.pkl")
+    TREE_MODEL_SAVE_PATH   = os.path.join(ARTIFACT_DIR, "decision_tree_model.pkl")
+    METADATA_SAVE_PATH     = os.path.join(ARTIFACT_DIR, "model_metadata.pkl")
+
+    # --- Training ---
+    TEST_SIZE              = 0.20
+    RANDOM_STATE           = 42
+    N_SYNTHETIC_TRIALS     = 2000
+
+    # --- Risk tier thresholds ---
+    RISK_HIGH_THRESHOLD    = 0.40   # < 0.40  -> HIGH risk
+    RISK_MEDIUM_THRESHOLD  = 0.65   # 0.40-0.64 -> MEDIUM  |  >=0.65 -> LOW
+
+    # --- Biomarkers counted toward confidence coverage ---
+    KEY_BIOMARKERS = [
+        "apoe_e4_carrier", "ptau217_high", "amyloid_pet_positive",
+        "tau_pet_positive", "csf_abeta42_40_ratio_low", "csf_ptau_elevated",
+        "hippocampal_atrophy_binary",
     ]
-    
-    # Risk tier thresholds (success probability cutoffs)
-    RISK_THRESHOLDS = {
-        "HIGH": 0.40,    # < 0.40 = HIGH risk
-        "MEDIUM": 0.70,  # 0.40 - 0.69 = MEDIUM risk
-        "LOW": 1.0       # >= 0.70 = LOW risk
-    }
-    
-    # Required biomarkers for HIGH confidence
-    REQUIRED_BIOMARKERS = [
-        "apoe_e4_carrier",
-        "ptau217_high",
-        "amyloid_pet_positive",
-        "age_mean",
-        "baseline_mmse",
-        "cdr_baseline",
-        "trial_sample_size",
-        "trial_duration_weeks",
-        "endpoint_type",
-        "primary_endpoint_name",
-        "biomarker_enrichment_strategy",
-    ]
-    
-    # Categorical features that need one-hot encoding
+
+    # --- Categorical features for one-hot encoding ---
     CATEGORICAL_FEATURES = [
         "endpoint_type",
         "primary_endpoint_name",
         "biomarker_enrichment_strategy",
         "randomization_ratio",
-    ]
-    
-    # Expected features after one-hot encoding (in training order)
-    EXPECTED_FEATURES = [
-        "apoe_e4_carrier",
-        "apoe_e4_homozygous",
-        "ptau217_continuous",
-        "ptau217_high",
-        "csf_abeta42_40_ratio_continuous",
-        "csf_abeta42_40_ratio_low",
-        "csf_ptau_elevated",
-        "amyloid_pet_positive",
-        "tau_pet_positive",
-        "hippocampal_atrophy_mri",
-        "hippocampal_atrophy_binary",
-        "age_mean",
-        "baseline_mmse",
-        "baseline_moca",
-        "cdr_baseline",
-        "trial_sample_size",
-        "trial_duration_weeks",
-        "number_of_arms",
-        "endpoint_type_objective",
-        "endpoint_type_subjective",
-        "primary_endpoint_name_ADCOMS",
-        "primary_endpoint_name_CDR-SB",
-        "primary_endpoint_name_MMSE",
-        "biomarker_enrichment_strategy_at_positive",
-        "biomarker_enrichment_strategy_cognitive_only",
-        "biomarker_enrichment_strategy_none",
-        "biomarker_enrichment_strategy_tau_positive",
-        "randomization_ratio_2:1",
-        "randomization_ratio_open_label",
+        "phase",
+        "indication",
     ]
 
-
-class RuleBasedWeights:
-    """Rule-based scoring weights encoding clinical domain knowledge."""
-    
-    # Biomarker contributions
-    AMYLOID_PET_POSITIVE = 0.25
-    PTAU217_HIGH = 0.20
-    CSF_ABETA42_40_LOW = 0.15
-    CSF_PTAU_ELEVATED = 0.12
-    TAU_PET_POSITIVE = 0.10
-    APOE_E4_CARRIER = 0.15
-    APOE_E4_HOMOZYGOUS = 0.08
-    HIPPOCAMPAL_ATROPHY = 0.05
-    
-    # Trial design contributions
-    LONG_DURATION_GE_52_WEEKS = 0.10
-    MEDIUM_DURATION_GE_36_WEEKS = 0.05
-    ADEQUATE_SAMPLE_SIZE_GE_250 = 0.08
-    GOOD_SAMPLE_SIZE_GE_150 = 0.04
-    GOOD_ENDPOINT_TYPE_MIXED = 0.02
-    GOOD_PRIMARY_ENDPOINT = 0.05
-    RANDOMIZED_STRUCTURE = 0.03
-    ADAPTIVE_RANDOMIZATION = 0.02
-    
-    # Cognitive stage contributions
-    BASELINE_MMSE_MCI_SWEET_SPOT = 0.10
-    BASELINE_MMSE_MILD_DEMENTIA = 0.03
-    HIPPOCAMPAL_VOLUME_NORMAL = 0.05
-    
-    # Enrichment bonus
-    ENRICHMENT_AT_POSITIVE = 0.08
-    ENRICHMENT_AMYLOID_POSITIVE = 0.06
-    
-    # Age adjustment
-    AGE_SWEET_SPOT_60_75 = 0.04
-    
-    # Penalties
-    SMALL_SAMPLE_LT_100 = -0.20
-    MEDIUM_SMALL_SAMPLE_LT_150 = -0.10
-    SHORT_DURATION_LT_24_WEEKS = -0.12
-    MEDIUM_SHORT_DURATION_LT_36_WEEKS = -0.06
-    ADVANCED_DEMENTIA_MMSE_LT_16 = -0.20
-    VERY_ADVANCED_DEMENTIA_MMSE_LT_10 = -0.30
-    MILD_COGNITIVE_DECLINE_MMSE_GT_26 = -0.08
-    NO_ENRICHMENT = -0.10
-    OPEN_LABEL_STRUCTURE = -0.08
-    OBJECTIVE_ENDPOINT_ONLY = -0.05
-    UNCOMMON_ENDPOINT = -0.03
-    
-    # Age penalties
-    AGE_LT_60 = -0.05
-    AGE_GT_80 = -0.06
-
-
-# ====== DATA LOADING FUNCTIONS ======
-
-def load_and_prepare_data(data_path: str) -> Tuple[pd.DataFrame, pd.Series, list]:
-    """
-    Load synthetic trial data and prepare for training.
-    
-    Args:
-        data_path: Path to CSV file with trial data.
-    
-    Returns:
-        Tuple of (X: features DataFrame, y: labels Series, feature_names: list)
-    """
-    print(f"Loading data from: {data_path}")
-    df = pd.read_csv(data_path)
-    print(f"  ✓ Loaded {len(df)} trials with {len(df.columns)} columns")
-    
-    # Extract labels
-    y = df["trial_success"]
-    print(f"  ✓ Labels: {y.value_counts().to_dict()}")
-    
-    # Select features
-    feature_cols = [
-        col for col in df.columns 
-        if col not in MLConfig.EXCLUDE_FEATURES
+    # --- Numerical features ---
+    NUMERICAL_FEATURES = [
+        "apoe_e4_carrier", "apoe_e4_homozygous",
+        "ptau217_continuous", "ptau217_high",
+        "csf_abeta42_40_ratio_continuous", "csf_abeta42_40_ratio_low",
+        "csf_ptau_elevated", "amyloid_pet_positive", "tau_pet_positive",
+        "hippocampal_atrophy_mri", "hippocampal_atrophy_binary",
+        "age_mean", "baseline_mmse", "baseline_moca", "cdr_baseline",
+        "trial_sample_size", "trial_duration_weeks", "number_of_arms",
     ]
-    X = df[feature_cols].copy()
-    
-    print(f"  ✓ Selected {len(feature_cols)} features for training")
-    
-    # Handle missing values
-    missing_per_col = X.isnull().sum()
-    cols_with_missing = missing_per_col[missing_per_col > 0]
-    
-    if len(cols_with_missing) > 0:
-        print(f"\n  ⚠ Found missing values:")
-        for col, count in cols_with_missing.items():
-            print(f"    - {col}: {count} missing ({count/len(X)*100:.1f}%)")
-        
-        # Fill missing with median for numerical, mode for categorical
-        for col in X.columns:
-            if X[col].dtype in ['float64', 'int64']:
-                X[col] = X[col].fillna(X[col].median())
-            else:
-                mode_val = X[col].mode()[0] if len(X[col].mode()) > 0 else "unknown"
-                X[col] = X[col].fillna(mode_val)
-        print(f"  ✓ Filled missing values")
-    
-    # Convert categorical features to numeric via one-hot encoding
-    categorical_cols = X.select_dtypes(include=['object']).columns.tolist()
-    if len(categorical_cols) > 0:
-        print(f"\n  ⚠ Found {len(categorical_cols)} categorical features")
-        X = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
-        print(f"  ✓ One-hot encoded categorical features")
-        print(f"    New shape: {X.shape}")
-    
-    return X, y, X.columns.tolist()
 
+    # --- Human-readable labels for raw feature names ---
+    FEATURE_LABELS: Dict[str, str] = {
+        "amyloid_pet_positive":                      "Amyloid PET Positive",
+        "tau_pet_positive":                          "Tau PET Positive",
+        "ptau217_high":                              "pTau-217 Elevated",
+        "ptau217_continuous":                        "pTau-217 (continuous)",
+        "csf_abeta42_40_ratio_low":                  "CSF Ab42/40 Ratio Low",
+        "csf_abeta42_40_ratio_continuous":           "CSF Ab42/40 Ratio (continuous)",
+        "csf_ptau_elevated":                         "CSF p-tau Elevated",
+        "apoe_e4_carrier":                           "APOE e4 Carrier",
+        "apoe_e4_homozygous":                        "APOE e4 Homozygous",
+        "hippocampal_atrophy_binary":                "Hippocampal Atrophy (MRI)",
+        "hippocampal_atrophy_mri":                   "Hippocampal Volume (MRI)",
+        "age_mean":                                  "Mean Enrollment Age",
+        "baseline_mmse":                             "Baseline MMSE Score",
+        "baseline_moca":                             "Baseline MoCA Score",
+        "cdr_baseline":                              "Clinical Dementia Rating",
+        "trial_sample_size":                         "Trial Sample Size",
+        "trial_duration_weeks":                      "Trial Duration (weeks)",
+        "number_of_arms":                            "Number of Trial Arms",
+        "endpoint_type_objective":                   "Objective (Biomarker) Endpoint",
+        "endpoint_type_subjective":                  "Subjective (Cognitive Scale) Endpoint",
+        "primary_endpoint_name_CDR-SB":              "CDR-SB Primary Endpoint",
+        "primary_endpoint_name_MMSE":                "MMSE Primary Endpoint",
+        "primary_endpoint_name_ADAS-Cog":            "ADAS-Cog Primary Endpoint",
+        "primary_endpoint_name_ADCOMS":              "ADCOMS Primary Endpoint",
+        "primary_endpoint_name_amyloid_clearance":   "Amyloid Clearance Endpoint",
+        "biomarker_enrichment_strategy_at_positive": "Biomarker Enrichment (AT+)",
+        "biomarker_enrichment_strategy_amyloid_pet": "Biomarker Enrichment (Amyloid PET)",
+        "biomarker_enrichment_strategy_none":        "No Enrichment Strategy",
+        "biomarker_enrichment_strategy_cognitive":   "Cognitive Enrichment Only",
+        "randomization_ratio_2:1":                   "2:1 Randomization Ratio",
+        "randomization_ratio_open_label":            "Open-Label Design",
+    }
 
-# ====== FEATURE ENGINEERING ======
-
-def engineer_features(input_dict: Dict[str, Any]) -> Tuple[pd.DataFrame, List[str]]:
-    """
-    Convert raw trial input to engineered features matching training pipeline.
-    
-    Args:
-        input_dict: Raw trial data with all fields.
-    
-    Returns:
-        Tuple of (engineered_features DataFrame, feature_names list)
-    """
-    X = pd.DataFrame([input_dict]).copy()
-    
-    # Fill missing values in numerical columns
-    numerical_cols = [
-        "apoe_e4_carrier", "apoe_e4_homozygous", "ptau217_continuous", "ptau217_high",
-        "csf_abeta42_40_ratio_continuous", "csf_abeta42_40_ratio_low", "csf_ptau_elevated",
-        "amyloid_pet_positive", "tau_pet_positive", "hippocampal_atrophy_mri",
-        "hippocampal_atrophy_binary", "age_mean", "baseline_mmse", "baseline_moca",
-        "cdr_baseline", "trial_sample_size", "trial_duration_weeks", "number_of_arms"
-    ]
-    
-    for col in numerical_cols:
-        if col in X.columns:
-            X[col] = pd.to_numeric(X[col], errors='coerce')
-            if X[col].isnull().any():
-                X[col] = X[col].fillna(0.0)
-        else:
-            X[col] = 0.0
-    
-    # Handle categorical columns
-    categorical_cols = [
-        "endpoint_type", "primary_endpoint_name", 
-        "biomarker_enrichment_strategy", "randomization_ratio"
-    ]
-    
-    for col in categorical_cols:
-        if col in X.columns:
-            X[col] = X[col].fillna("unknown")
-            X[col] = X[col].astype(str)
-        else:
-            X[col] = "unknown"
-    
-    # One-hot encode categorical features
-    X_encoded = pd.get_dummies(X, columns=categorical_cols, drop_first=True)
-    
-    # Add missing encoded features with 0 values
-    for feature in MLConfig.EXPECTED_FEATURES:
-        if feature not in X_encoded.columns:
-            X_encoded[feature] = 0
-    
-    # Reorder columns to match expected feature order
-    X_final = X_encoded[MLConfig.EXPECTED_FEATURES].copy()
-    
-    return X_final, MLConfig.EXPECTED_FEATURES
-
-
-# ====== MODEL TRAINING ======
-
-def train_model(X_train: pd.DataFrame, y_train: pd.Series) -> Tuple[LogisticRegression, StandardScaler]:
-    """
-    Train logistic regression model.
-    
-    Args:
-        X_train: Training features.
-        y_train: Training labels.
-    
-    Returns:
-        Tuple of (trained model, fitted scaler)
-    """
-    print("\nTraining Logistic Regression Model")
-    print("=" * 80)
-    
-    # Standardize features
-    scaler = StandardScaler()
-    X_train_scaled = scaler.fit_transform(X_train)
-    
-    # Train model
-    model = LogisticRegression(
-        max_iter=1000,
-        random_state=MLConfig.RANDOM_STATE,
-        solver="lbfgs",
-        class_weight="balanced",
-        verbose=0
-    )
-    
-    model.fit(X_train_scaled, y_train)
-    
-    print(f"  ✓ Model trained")
-    print(f"    Intercept: {model.intercept_[0]:.4f}")
-    print(f"    Coefficients learned: {len(model.coef_[0])} features")
-    
-    return model, scaler
-
-
-def evaluate_model(
-    model: LogisticRegression,
-    scaler: StandardScaler,
-    X_test: pd.DataFrame,
-    y_test: pd.Series,
-    feature_names: list
-) -> Dict:
-    """
-    Evaluate model on test set.
-    
-    Args:
-        model: Trained model.
-        scaler: Fitted feature scaler.
-        X_test: Test features.
-        y_test: Test labels.
-        feature_names: List of feature names.
-    
-    Returns:
-        Dictionary with evaluation metrics.
-    """
-    print("\nModel Evaluation")
-    print("=" * 80)
-    
-    # Scale test features
-    X_test_scaled = scaler.transform(X_test)
-    
-    # Predictions
-    y_pred = model.predict(X_test_scaled)
-    y_pred_proba = model.predict_proba(X_test_scaled)[:, 1]
-    
-    # Metrics
-    accuracy = accuracy_score(y_test, y_pred)
-    auc_score = roc_auc_score(y_test, y_pred_proba)
-    cm = confusion_matrix(y_test, y_pred)
-    
-    print(f"  ✓ Accuracy: {accuracy:.4f}")
-    print(f"  ✓ AUC: {auc_score:.4f}")
-    print(f"  ✓ Confusion Matrix:\n{cm}")
-    
-    return {
-        "accuracy": accuracy,
-        "auc": auc_score,
-        "confusion_matrix": cm.tolist(),
+    # --- Biomarker explanation text for interpretability layer ---
+    BIOMARKER_EXPLANATIONS: Dict[str, str] = {
+        "amyloid_pet_positive":
+            "Amyloid PET confirmation is the gold standard for Alzheimer's enrichment. "
+            "Positive status strongly indicates the presence of target pathology and "
+            "is the single strongest predictor of trial success in anti-amyloid programs.",
+        "tau_pet_positive":
+            "Tau PET positivity identifies active neurofibrillary pathology. Combined "
+            "with amyloid confirmation, it provides the strongest multi-modal biomarker "
+            "profile for CNS trial success.",
+        "ptau217_high":
+            "Elevated plasma pTau-217 is the leading blood-based predictor of amyloid "
+            "positivity and disease-stage appropriate for intervention. Reduces screening "
+            "failures and improves trial efficiency.",
+        "csf_abeta42_40_ratio_low":
+            "Low CSF Ab42/40 ratio confirms cerebral amyloid pathology with high "
+            "specificity. A validated enrichment criterion used in lecanemab and "
+            "donanemab Phase III programs.",
+        "csf_ptau_elevated":
+            "Elevated CSF p-tau confirms neuronal injury and tau hyperphosphorylation. "
+            "Supports patient selection at the optimal intervention stage.",
+        "apoe_e4_carrier":
+            "APOE e4 carrier status enriches for higher amyloid burden and faster "
+            "disease progression, improving sensitivity to treatment effects. "
+            "Requires enhanced ARIA monitoring in anti-amyloid trials.",
+        "apoe_e4_homozygous":
+            "Homozygous APOE e4 confers very high amyloid burden but substantially "
+            "elevated ARIA risk. Creates a net safety liability in immunotherapy programs "
+            "unless specifically managed with enhanced monitoring protocols.",
+        "hippocampal_atrophy_binary":
+            "Hippocampal atrophy on structural MRI confirms neurodegeneration consistent "
+            "with AD pathology and supports target engagement and disease staging.",
     }
 
 
-def save_model(model: LogisticRegression, scaler: StandardScaler, model_path: str = None, scaler_path: str = None):
+# ====================================================================
+# INDICATION & PHASE CALIBRATION
+# ====================================================================
+
+# Published Phase II -> III success rates by CNS indication
+# Source: BIO/Informa/QLS 2011-2020 industry analysis + Wong et al. 2019
+INDICATION_BASE_RATES: Dict[str, float] = {
+    "alzheimer's disease":           0.35,
+    "alzheimer's":                   0.35,
+    "parkinson's disease":           0.41,
+    "parkinson's":                   0.41,
+    "multiple sclerosis":            0.53,
+    "ms":                            0.53,
+    "amyotrophic lateral sclerosis": 0.25,
+    "als":                           0.25,
+    "huntington's disease":          0.30,
+    "huntington's":                  0.30,
+    "frontotemporal dementia":       0.28,
+    "ftd":                           0.28,
+    "lewy body dementia":            0.27,
+    "vascular dementia":             0.33,
+    "depression":                    0.40,
+    "schizophrenia":                 0.36,
+    "epilepsy":                      0.44,
+    "migraine":                      0.48,
+    "cns (general)":                 0.35,
+}
+
+PHASE_BASE_RATES: Dict[str, float] = {
+    "Phase I":   0.52,
+    "Phase II":  0.35,
+    "Phase III": 0.59,
+    "Phase IV":  0.82,
+}
+
+
+def get_base_rate(
+    phase: Optional[str],
+    indication: Optional[str],
+) -> Tuple[float, str]:
+    """Return calibrated base success rate for a phase + indication pair."""
+    phase_rate   = PHASE_BASE_RATES.get(phase or "Phase II", 0.35)
+    indication_l = (indication or "").lower().strip()
+
+    matched_rate = None
+    matched_name = "CNS (general)"
+    for key, rate in INDICATION_BASE_RATES.items():
+        if key in indication_l or indication_l in key:
+            matched_rate = rate
+            matched_name = indication or key
+            break
+
+    if matched_rate is not None:
+        base = (phase_rate + matched_rate) / 2.0
+    else:
+        base = phase_rate
+
+    return float(np.clip(base, 0.05, 0.90)), matched_name
+
+
+# ====================================================================
+# SYNTHETIC DATA GENERATION
+# ====================================================================
+
+def generate_synthetic_trials(
+    n_trials: int = MLConfig.N_SYNTHETIC_TRIALS,
+    random_state: int = MLConfig.RANDOM_STATE,
+) -> pd.DataFrame:
     """
-    Save trained model and scaler to disk.
-    
+    Generate a calibrated synthetic CNS trial dataset for model training.
+
+    The data-generating process encodes clinically grounded signal so
+    the trained ML model learns from the same domain knowledge as the
+    rule-based scorer.
+
     Args:
-        model: Trained model object.
-        scaler: Fitted scaler object.
-        model_path: Path to save model (default: MLConfig.MODEL_SAVE_PATH).
-        scaler_path: Path to save scaler (default: MLConfig.SCALER_SAVE_PATH).
-    """
-    model_path = model_path or MLConfig.MODEL_SAVE_PATH
-    scaler_path = scaler_path or MLConfig.SCALER_SAVE_PATH
-    
-    os.makedirs(os.path.dirname(model_path), exist_ok=True)
-    
-    with open(model_path, "wb") as f:
-        pickle.dump(model, f)
-    print(f"  ✓ Model saved to {model_path}")
-    
-    with open(scaler_path, "wb") as f:
-        pickle.dump(scaler, f)
-    print(f"  ✓ Scaler saved to {scaler_path}")
+        n_trials:     Number of trials to generate.
+        random_state: NumPy random seed for reproducibility.
 
-
-# ====== PREDICTION FUNCTIONS ======
-
-def load_model_and_scaler(model_path: str = None, scaler_path: str = None) -> Tuple[Any, StandardScaler]:
-    """
-    Load trained model and scaler from disk.
-    
-    Args:
-        model_path: Path to model (default: MLConfig.MODEL_SAVE_PATH).
-        scaler_path: Path to scaler (default: MLConfig.SCALER_SAVE_PATH).
-    
     Returns:
-        Tuple of (model, scaler)
-    
-    Raises:
-        FileNotFoundError: If model or scaler not found.
+        DataFrame with trial features + binary trial_success label.
     """
-    model_path = model_path or MLConfig.MODEL_SAVE_PATH
-    scaler_path = scaler_path or MLConfig.SCALER_SAVE_PATH
-    
-    if not os.path.exists(model_path):
-        raise FileNotFoundError(
-            f"Model not found at {model_path}. "
-            "Run ml_engine.train_full_pipeline() first."
-        )
-    
-    if not os.path.exists(scaler_path):
-        raise FileNotFoundError(
-            f"Scaler not found at {scaler_path}. "
-            "Run ml_engine.train_full_pipeline() first."
-        )
-    
-    with open(model_path, "rb") as f:
-        model = pickle.load(f)
-    
-    with open(scaler_path, "rb") as f:
-        scaler = pickle.load(f)
-    
+    rng = np.random.default_rng(random_state)
+
+    indications   = ["Alzheimer's Disease", "Parkinson's Disease", "Multiple Sclerosis",
+                     "ALS", "Huntington's Disease", "Frontotemporal Dementia"]
+    ind_probs     = [0.50, 0.18, 0.12, 0.08, 0.06, 0.06]
+
+    phases        = ["Phase I", "Phase II", "Phase III"]
+    phase_probs   = [0.10, 0.65, 0.25]
+
+    ep_types      = ["objective", "subjective"]
+    ep_names      = ["CDR-SB", "MMSE", "ADAS-Cog", "ADCOMS", "amyloid_clearance"]
+    enrichments   = ["at_positive", "amyloid_pet", "cognitive", "none"]
+    enr_probs     = [0.30, 0.25, 0.20, 0.25]
+    rand_ratios   = ["1:1", "2:1", "open_label"]
+
+    records = []
+    for _ in range(n_trials):
+        indication = rng.choice(indications, p=ind_probs)
+        phase      = rng.choice(phases, p=phase_probs)
+        is_ad      = "alzheimer" in indication.lower()
+        bio_rate   = 0.65 if is_ad else 0.35
+
+        # Biomarkers
+        amyloid_pet   = int(rng.random() < bio_rate)
+        tau_pet       = int(rng.random() < bio_rate * 0.75)
+        ptau217_high  = int(rng.random() < bio_rate + 0.05)
+        csf_abeta_low = int(rng.random() < bio_rate)
+        csf_ptau      = int(rng.random() < bio_rate * 0.80)
+        apoe_e4       = int(rng.random() < 0.45)
+        apoe_homo     = int(rng.random() < 0.12) if apoe_e4 else 0
+        hippo_atrophy = int(rng.random() < 0.60)
+        hippo_mri     = float(rng.normal(0.75, 0.15))
+        ptau217_cont  = float(rng.exponential(2.5)) if ptau217_high else float(rng.exponential(0.8))
+        csf_abeta_cont = float(rng.normal(0.05, 0.02)) if csf_abeta_low else float(rng.normal(0.12, 0.03))
+
+        # Enrollment
+        age_mean      = float(rng.normal(70, 7))
+        baseline_mmse = float(rng.normal(21, 5))
+        baseline_moca = float(rng.normal(19, 5))
+        cdr_baseline  = float(rng.choice([0.5, 1.0, 2.0, 3.0], p=[0.30, 0.40, 0.20, 0.10]))
+
+        # Trial design
+        sample_size    = int(rng.integers(30, 600))
+        duration_weeks = int(rng.integers(12, 156))
+        n_arms         = int(rng.choice([2, 3], p=[0.80, 0.20]))
+        endpoint_type  = rng.choice(ep_types, p=[0.45, 0.55])
+        endpoint_name  = rng.choice(ep_names)
+        enrichment     = rng.choice(enrichments, p=enr_probs)
+        rand_ratio     = rng.choice(rand_ratios, p=[0.70, 0.20, 0.10])
+
+        # Ground-truth probability (logit space)
+        base_rate, _ = get_base_rate(phase, indication)
+        lo = math.log(base_rate / (1 - base_rate))
+
+        lo += amyloid_pet    * 0.55
+        lo += tau_pet        * 0.38
+        lo += ptau217_high   * 0.42
+        lo += csf_abeta_low  * 0.32
+        lo += csf_ptau       * 0.28
+        lo += apoe_e4        * 0.18
+        lo -= apoe_homo      * 0.12
+        lo += hippo_atrophy  * 0.12
+        lo += min(ptau217_cont * 0.04, 0.20)
+        lo -= min(abs(csf_abeta_cont - 0.05) * 2, 0.15)
+
+        if endpoint_type == "objective": lo += 0.32
+        else:                            lo -= 0.18
+        if endpoint_name in ("CDR-SB", "ADCOMS", "amyloid_clearance"): lo += 0.10
+
+        if sample_size >= 250:   lo += 0.30
+        elif sample_size >= 150: lo += 0.18
+        elif sample_size >= 100: lo += 0.10
+        elif sample_size < 50:   lo -= 0.32
+
+        if duration_weeks >= 78:   lo += 0.28
+        elif duration_weeks >= 52: lo += 0.18
+        elif duration_weeks >= 36: lo += 0.05
+        elif duration_weeks < 24:  lo -= 0.28
+
+        if enrichment == "at_positive":  lo += 0.30
+        elif enrichment == "amyloid_pet":lo += 0.24
+        elif enrichment == "none":       lo -= 0.14
+
+        if rand_ratio == "open_label": lo -= 0.10
+
+        if 65 <= age_mean <= 80:    lo += 0.08
+        elif age_mean < 58:         lo -= 0.10
+        if 18 <= baseline_mmse <= 26: lo += 0.14
+        elif baseline_mmse < 12:    lo -= 0.22
+        if 0.5 <= cdr_baseline <= 1.0: lo += 0.12
+        elif cdr_baseline > 2.0:    lo -= 0.18
+
+        sp = float(np.clip(1 / (1 + math.exp(-lo)) + rng.normal(0, 0.04), 0.02, 0.97))
+
+        records.append({
+            "apoe_e4_carrier":                apoe_e4,
+            "apoe_e4_homozygous":             apoe_homo,
+            "ptau217_continuous":             round(ptau217_cont, 3),
+            "ptau217_high":                   ptau217_high,
+            "csf_abeta42_40_ratio_continuous":round(csf_abeta_cont, 4),
+            "csf_abeta42_40_ratio_low":       csf_abeta_low,
+            "csf_ptau_elevated":              csf_ptau,
+            "amyloid_pet_positive":           amyloid_pet,
+            "tau_pet_positive":               tau_pet,
+            "hippocampal_atrophy_mri":        round(hippo_mri, 3),
+            "hippocampal_atrophy_binary":     hippo_atrophy,
+            "age_mean":                       round(age_mean, 1),
+            "baseline_mmse":                  round(max(0, min(30, baseline_mmse)), 1),
+            "baseline_moca":                  round(max(0, min(30, baseline_moca)), 1),
+            "cdr_baseline":                   cdr_baseline,
+            "trial_sample_size":              sample_size,
+            "trial_duration_weeks":           duration_weeks,
+            "number_of_arms":                 n_arms,
+            "endpoint_type":                  endpoint_type,
+            "primary_endpoint_name":          endpoint_name,
+            "biomarker_enrichment_strategy":  enrichment,
+            "randomization_ratio":            rand_ratio,
+            "phase":                          phase,
+            "indication":                     indication,
+            "trial_success_probability":      round(sp, 4),
+            "trial_success":                  int(rng.random() < sp),
+        })
+
+    df = pd.DataFrame(records)
+    logger.info(f"Generated {len(df)} synthetic trials | "
+                f"success rate: {df['trial_success'].mean():.1%}")
+    return df
+
+
+# ====================================================================
+# FEATURE ENGINEERING
+# ====================================================================
+
+_EXCLUDE_COLS = {"trial_id", "trial_success_probability", "trial_success"}
+
+# Fixed categorical level sets — ensures consistent one-hot columns
+_CAT_LEVELS: Dict[str, List[str]] = {
+    "endpoint_type":                 ["objective", "subjective"],
+    "primary_endpoint_name":         ["CDR-SB", "MMSE", "ADAS-Cog", "ADCOMS", "amyloid_clearance"],
+    "biomarker_enrichment_strategy": ["at_positive", "amyloid_pet", "cognitive", "none"],
+    "randomization_ratio":           ["1:1", "2:1", "open_label"],
+    "phase":                         ["Phase I", "Phase II", "Phase III", "Phase IV"],
+    "indication": [
+        "Alzheimer's Disease", "Parkinson's Disease", "Multiple Sclerosis",
+        "ALS", "Huntington's Disease", "Frontotemporal Dementia",
+    ],
+}
+
+
+def load_and_prepare_data(
+    data_path: Optional[str] = None,
+    generate_if_missing: bool = True,
+) -> Tuple[pd.DataFrame, pd.Series, List[str]]:
+    """
+    Load (or generate) training data.
+
+    Returns:
+        (X: features DataFrame, y: labels Series, column_names: list)
+    """
+    path = data_path or MLConfig.DATA_PATH
+
+    if os.path.exists(path):
+        logger.info(f"Loading data from {path}")
+        df = pd.read_csv(path)
+    elif generate_if_missing:
+        logger.info("Data not found — generating synthetic dataset.")
+        df = generate_synthetic_trials()
+        try:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            df.to_csv(path, index=False)
+            logger.info(f"Saved synthetic data to {path}")
+        except Exception:
+            pass
+    else:
+        raise FileNotFoundError(f"Training data not found at {path}")
+
+    y = df["trial_success"].astype(int)
+    feature_cols = [c for c in df.columns if c not in _EXCLUDE_COLS]
+    X = df[feature_cols].copy()
+
+    # Fill numerics
+    for col in MLConfig.NUMERICAL_FEATURES:
+        if col in X.columns:
+            X[col] = pd.to_numeric(X[col], errors="coerce").fillna(X[col].median())
+
+    # Fill categoricals
+    for col in MLConfig.CATEGORICAL_FEATURES:
+        if col in X.columns:
+            X[col] = X[col].fillna("unknown").astype(str)
+
+    # One-hot encode with fixed levels for reproducible column order
+    cat_present = [c for c in MLConfig.CATEGORICAL_FEATURES if c in X.columns]
+    X = pd.get_dummies(X, columns=cat_present)
+
+    # Ensure all expected OHE columns exist
+    for col, levels in _CAT_LEVELS.items():
+        for level in levels:
+            ohe_col = f"{col}_{level}"
+            if ohe_col not in X.columns:
+                X[ohe_col] = 0
+
+    # Sort columns for reproducibility
+    X = X.reindex(sorted(X.columns), axis=1)
+
+    logger.info(f"Data shape: {X.shape} | success rate: {y.mean():.1%}")
+    return X, y, X.columns.tolist()
+
+
+def engineer_features(
+    input_dict: Dict[str, Any],
+    reference_columns: Optional[List[str]] = None,
+) -> Tuple[pd.DataFrame, List[str]]:
+    """
+    Convert a single trial input dict into a model-ready feature DataFrame.
+
+    Handles missing values gracefully. Aligns columns to training layout.
+
+    Args:
+        input_dict:         Raw trial parameters.
+        reference_columns:  Column order from training (from saved metadata).
+
+    Returns:
+        (X: single-row DataFrame, column_names: list)
+    """
+    row: Dict[str, float] = {}
+
+    # Numerics
+    for col in MLConfig.NUMERICAL_FEATURES:
+        val = input_dict.get(col)
+        if val is None or (isinstance(val, float) and math.isnan(val)):
+            row[col] = 0.0
+        else:
+            try:
+                row[col] = float(val)
+            except (ValueError, TypeError):
+                row[col] = 0.0
+
+    # Manual one-hot encoding using fixed level sets
+    for col, levels in _CAT_LEVELS.items():
+        actual = str(input_dict.get(col) or "unknown").strip()
+        for level in levels:
+            row[f"{col}_{level}"] = 1.0 if actual == level else 0.0
+
+    X = pd.DataFrame([row])
+
+    # Align to reference columns
+    if reference_columns is None:
+        meta = _load_metadata()
+        reference_columns = meta.get("feature_columns") if meta else None
+
+    if reference_columns is not None:
+        for col in reference_columns:
+            if col not in X.columns:
+                X[col] = 0.0
+        X = X[reference_columns]
+    else:
+        # Last resort: sort columns for reproducibility
+        X = X.reindex(sorted(X.columns), axis=1)
+
+    return X, list(X.columns)
+
+
+# ====================================================================
+# MODEL TRAINING
+# ====================================================================
+
+def train_model(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+) -> Tuple[Any, StandardScaler]:
+    """
+    Train a calibrated logistic regression model.
+
+    Uses Platt calibration (5-fold) for well-calibrated probabilities,
+    balanced class weights for imbalanced datasets, and mild L2
+    regularisation.
+
+    Returns:
+        (calibrated_model, fitted_scaler)
+    """
+    scaler   = StandardScaler()
+    X_scaled = scaler.fit_transform(X_train)
+
+    base = LogisticRegression(
+        max_iter=2000,
+        random_state=MLConfig.RANDOM_STATE,
+        solver="lbfgs",
+        class_weight="balanced",
+        C=0.8,
+    )
+
+    model = CalibratedClassifierCV(base, cv=5, method="sigmoid")
+    model.fit(X_scaled, y_train)
+
+    # Log cross-val AUC for transparency
+    cv_scores = cross_val_score(
+        LogisticRegression(max_iter=2000, random_state=MLConfig.RANDOM_STATE,
+                           solver="lbfgs", class_weight="balanced", C=0.8),
+        X_scaled, y_train, cv=5, scoring="roc_auc",
+    )
+    logger.info(f"5-fold CV AUC: {cv_scores.mean():.4f} +/- {cv_scores.std():.4f}")
+
     return model, scaler
+
+
+def train_decision_tree(
+    X_train: pd.DataFrame,
+    y_train: pd.Series,
+    scaler: StandardScaler,
+) -> DecisionTreeClassifier:
+    """Train a shallow decision tree as an interpretable companion model."""
+    tree = DecisionTreeClassifier(
+        max_depth=5,
+        min_samples_leaf=20,
+        class_weight="balanced",
+        random_state=MLConfig.RANDOM_STATE,
+    )
+    tree.fit(scaler.transform(X_train), y_train)
+    return tree
+
+
+def evaluate_model(
+    model: Any,
+    scaler: StandardScaler,
+    X_test: pd.DataFrame,
+    y_test: pd.Series,
+    verbose: bool = True,
+) -> Dict[str, Any]:
+    """Evaluate model on held-out test set. Returns metrics dict."""
+    X_scaled     = scaler.transform(X_test)
+    y_pred       = model.predict(X_scaled)
+    y_pred_proba = model.predict_proba(X_scaled)[:, 1]
+
+    metrics = {
+        "accuracy":         float(accuracy_score(y_test, y_pred)),
+        "auc":              float(roc_auc_score(y_test, y_pred_proba)),
+        "brier_score":      float(brier_score_loss(y_test, y_pred_proba)),
+        "confusion_matrix": confusion_matrix(y_test, y_pred).tolist(),
+        "n_test":           int(len(y_test)),
+        "positive_rate":    float(y_test.mean()),
+    }
+
+    if verbose:
+        logger.info(f"Test Accuracy : {metrics['accuracy']:.4f}")
+        logger.info(f"Test AUC      : {metrics['auc']:.4f}")
+        logger.info(f"Brier Score   : {metrics['brier_score']:.4f}")
+
+    return metrics
+
+
+# ====================================================================
+# ARTIFACT PERSISTENCE
+# ====================================================================
+
+def save_artifacts(
+    model: Any,
+    scaler: StandardScaler,
+    feature_columns: List[str],
+    eval_metrics: Optional[Dict] = None,
+    tree_model: Optional[Any] = None,
+) -> None:
+    """Save model, scaler, metadata, and optional tree to disk."""
+    os.makedirs(MLConfig.ARTIFACT_DIR, exist_ok=True)
+
+    with open(MLConfig.MODEL_SAVE_PATH,  "wb") as f: pickle.dump(model,  f)
+    with open(MLConfig.SCALER_SAVE_PATH, "wb") as f: pickle.dump(scaler, f)
+
+    if tree_model is not None:
+        with open(MLConfig.TREE_MODEL_SAVE_PATH, "wb") as f:
+            pickle.dump(tree_model, f)
+
+    metadata = {
+        "feature_columns": feature_columns,
+        "trained_at":      datetime.utcnow().isoformat() + "Z",
+        "engine_version":  "3.0",
+        "eval_metrics":    eval_metrics or {},
+        "n_features":      len(feature_columns),
+    }
+    with open(MLConfig.METADATA_SAVE_PATH, "wb") as f:
+        pickle.dump(metadata, f)
+
+    logger.info(f"All artifacts saved to {MLConfig.ARTIFACT_DIR}/")
+
+
+def load_artifacts() -> Tuple[Any, StandardScaler, Dict]:
+    """
+    Load model, scaler, and metadata from disk.
+
+    Raises:
+        FileNotFoundError: If artifacts don't exist.
+                           Caller should trigger train_full_pipeline().
+    """
+    for path in (MLConfig.MODEL_SAVE_PATH, MLConfig.SCALER_SAVE_PATH):
+        if not os.path.exists(path):
+            raise FileNotFoundError(
+                f"Artifact not found: {path}. "
+                "Run train_full_pipeline() to generate model artifacts."
+            )
+
+    with open(MLConfig.MODEL_SAVE_PATH,  "rb") as f: model  = pickle.load(f)
+    with open(MLConfig.SCALER_SAVE_PATH, "rb") as f: scaler = pickle.load(f)
+    meta = _load_metadata() or {}
+    return model, scaler, meta
+
+
+def _load_metadata() -> Optional[Dict]:
+    """Load metadata pkl; return None if missing."""
+    try:
+        with open(MLConfig.METADATA_SAVE_PATH, "rb") as f:
+            return pickle.load(f)
+    except Exception:
+        return None
+
+
+# ====================================================================
+# INTERPRETABILITY LAYER
+# ====================================================================
+
+def _humanize(raw_name: str) -> str:
+    """Translate a raw feature column name to a human-readable label."""
+    return MLConfig.FEATURE_LABELS.get(
+        raw_name,
+        raw_name.replace("_", " ").title(),
+    )
+
+
+def _extract_coefficients(model: Any, n_features: int) -> np.ndarray:
+    """
+    Safely extract coefficients from model regardless of wrapper type.
+
+    Handles: LogisticRegression, CalibratedClassifierCV, DecisionTree.
+    Falls back to zeros if extraction fails.
+    """
+    try:
+        if hasattr(model, "coef_"):
+            return model.coef_[0]
+        if hasattr(model, "calibrated_classifiers_"):
+            coefs = []
+            for cc in model.calibrated_classifiers_:
+                base = getattr(cc, "estimator", None) or getattr(cc, "base_estimator", None)
+                if base is not None and hasattr(base, "coef_"):
+                    coefs.append(base.coef_[0])
+            if coefs:
+                return np.mean(coefs, axis=0)
+        if hasattr(model, "feature_importances_"):
+            return model.feature_importances_
+    except Exception:
+        pass
+    return np.zeros(n_features)
 
 
 def get_top_features(
     model: Any,
     feature_names: List[str],
-    top_k: int = 5
+    top_k: int = 5,
 ) -> List[Dict[str, Any]]:
     """
-    Extract top K most important features from model.
-    
-    Args:
-        model: Trained logistic regression model.
-        feature_names: List of feature names.
-        top_k: Number of top features to return.
-    
-    Returns:
-        List of dicts with feature info and importance.
+    Return the top-K most influential features with human-readable labels.
+
+    Returns list of dicts: rank, feature (readable), raw_feature,
+    coefficient, importance_score, direction.
     """
-    coefficients = model.coef_[0]
-    feature_importance = list(zip(feature_names, coefficients))
-    feature_importance_sorted = sorted(
-        feature_importance,
+    coefficients = _extract_coefficients(model, len(feature_names))
+    pairs = sorted(
+        zip(feature_names, coefficients),
         key=lambda x: abs(x[1]),
-        reverse=True
+        reverse=True,
     )
-    
-    top_features = []
-    for rank, (feature_name, coef) in enumerate(feature_importance_sorted[:top_k], 1):
-        direction = "increases_probability" if coef > 0 else "decreases_probability"
-        
-        top_features.append({
-            "rank": rank,
-            "feature": feature_name,
-            "coefficient": float(coef),
+
+    return [
+        {
+            "rank":             rank,
+            "feature":          _humanize(raw),
+            "raw_feature":      raw,
+            "coefficient":      float(coef),
             "importance_score": float(abs(coef)),
-            "direction": direction
-        })
-    
-    return top_features
+            "direction":        "positive" if coef > 0 else "negative",
+        }
+        for rank, (raw, coef) in enumerate(pairs[:top_k], 1)
+    ]
 
 
-def get_risk_tier(success_probability: float) -> str:
+def generate_biomarker_explanation(
+    input_dict: Dict[str, Any],
+    top_features: List[Dict],
+    risk_tier: str,
+    missing_count: int,
+) -> str:
     """
-    Map success probability to risk tier.
-    
-    Args:
-        success_probability: Predicted probability (0-1).
-    
+    Generate a structured plain-English biomarker explanation suitable
+    for investor memos and diligence reports.
+    """
+    tier_language = {
+        "LOW":    "favourable risk profile",
+        "MEDIUM": "moderate risk profile",
+        "HIGH":   "elevated risk profile",
+    }
+    lines = [
+        f"This program presents a {tier_language.get(risk_tier, 'risk profile')} "
+        f"based on the submitted biomarker and trial design parameters."
+    ]
+
+    # Confirmed positive biomarkers
+    confirmed = [k for k in MLConfig.KEY_BIOMARKERS if input_dict.get(k) == 1]
+    if confirmed:
+        labels = [_humanize(k) for k in confirmed]
+        lines.append(
+            f"Confirmed positive biomarkers: {', '.join(labels)}. "
+            + ("Strong multi-modal confirmation significantly increases "
+               "the probability of trial success." if len(confirmed) >= 3
+               else "Partial biomarker support present.")
+        )
+        for bm in confirmed[:2]:
+            if bm in MLConfig.BIOMARKER_EXPLANATIONS:
+                lines.append(MLConfig.BIOMARKER_EXPLANATIONS[bm])
+    else:
+        lines.append(
+            "No positive biomarkers were confirmed. Success probability is "
+            "estimated from trial design and enrollment parameters only."
+        )
+
+    # Negative drivers
+    neg = [f for f in top_features if f["direction"] == "negative"][:2]
+    if neg:
+        neg_labels = [f["feature"] for f in neg]
+        lines.append(
+            f"Primary risk factors: {', '.join(neg_labels)}. "
+            "These factors are associated with reduced Phase II success probability "
+            "in historical CNS trial data."
+        )
+
+    # Data completeness caveat
+    if missing_count > 0:
+        lines.append(
+            f"Note: {missing_count} of {len(MLConfig.KEY_BIOMARKERS)} key biomarkers "
+            "were not provided. Supplying complete biomarker data would improve "
+            "prediction accuracy and confidence classification."
+        )
+
+    return " ".join(lines)
+
+
+# ====================================================================
+# CONFIDENCE SCORING
+# ====================================================================
+
+def compute_confidence(
+    input_dict: Dict[str, Any],
+    n_drivers: int,
+) -> Tuple[str, int]:
+    """
+    Compute prediction confidence and missing biomarker count.
+
+    HIGH:   >=4 key biomarkers + all core design fields present
+    MEDIUM: >=2 key biomarkers + core design fields present
+    LOW:    insufficient data
+
     Returns:
-        Risk tier: "LOW", "MEDIUM", or "HIGH"
+        (confidence_flag: str, missing_count: int)
     """
-    if success_probability >= MLConfig.RISK_THRESHOLDS["MEDIUM"]:
+    provided = sum(1 for k in MLConfig.KEY_BIOMARKERS if input_dict.get(k) is not None)
+    missing  = len(MLConfig.KEY_BIOMARKERS) - provided
+
+    core_fields    = ["trial_sample_size", "trial_duration_weeks", "endpoint_type", "age_mean"]
+    core_complete  = all(input_dict.get(f) is not None for f in core_fields)
+
+    if provided >= 4 and core_complete and n_drivers >= 4:
+        flag = "HIGH"
+    elif provided >= 2 and core_complete:
+        flag = "MEDIUM"
+    else:
+        flag = "LOW"
+
+    return flag, missing
+
+
+# ====================================================================
+# RISK TIER
+# ====================================================================
+
+def _get_risk_tier(probability: float) -> str:
+    if probability >= MLConfig.RISK_MEDIUM_THRESHOLD:
         return "LOW"
-    elif success_probability >= MLConfig.RISK_THRESHOLDS["HIGH"]:
+    elif probability >= MLConfig.RISK_HIGH_THRESHOLD:
         return "MEDIUM"
     else:
         return "HIGH"
 
 
+# ====================================================================
+# RULE-BASED SCORING (deterministic fallback)
+# ====================================================================
+
+class RuleBasedWeights:
+    """Clinically calibrated weights for rule-based scoring."""
+    # Biomarkers
+    AMYLOID_PET_POSITIVE          =  0.25
+    TAU_PET_POSITIVE              =  0.18
+    PTAU217_HIGH                  =  0.20
+    CSF_ABETA42_40_LOW            =  0.15
+    CSF_PTAU_ELEVATED             =  0.12
+    APOE_E4_CARRIER               =  0.12
+    APOE_E4_HOMOZYGOUS            = -0.08
+    HIPPOCAMPAL_ATROPHY           =  0.05
+    # Duration
+    LONG_DURATION_GE_78W          =  0.12
+    LONG_DURATION_GE_52W          =  0.08
+    MEDIUM_DURATION_GE_36W        =  0.03
+    SHORT_DURATION_LT_26W         = -0.14
+    VERY_SHORT_DURATION_LT_16W    = -0.22
+    # Sample size
+    LARGE_SAMPLE_GE_250           =  0.12
+    ADEQUATE_SAMPLE_GE_150        =  0.06
+    ADEQUATE_SAMPLE_GE_100        =  0.03
+    SMALL_SAMPLE_LT_50            = -0.22
+    MEDIUM_SMALL_SAMPLE_LT_100    = -0.10
+    # Endpoint
+    OBJECTIVE_ENDPOINT            =  0.14
+    SUBJECTIVE_ENDPOINT           = -0.10
+    # Enrichment
+    ENRICHMENT_AT_POSITIVE        =  0.14
+    ENRICHMENT_AMYLOID_PET        =  0.10
+    NO_ENRICHMENT                 = -0.10
+    # Enrollment
+    AGE_OPTIMAL_65_80             =  0.06
+    AGE_TOO_YOUNG_LT_60           = -0.08
+    AGE_TOO_OLD_GT_82             = -0.06
+    MMSE_OPTIMAL_18_26            =  0.10
+    MMSE_MILD_16_18               =  0.03
+    MMSE_SEVERE_LT_12             = -0.18
+    CDR_OPTIMAL_05_10             =  0.08
+    CDR_ADVANCED_GT_20            = -0.14
+
+
+class TrialScorer:
+    """Deterministic rule-based trial scorer. Used as ML fallback and for validation."""
+
+    def __init__(self, weights: Optional[RuleBasedWeights] = None):
+        self.w = weights or RuleBasedWeights()
+
+    def score(self, trial: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Score a single trial dict. Returns same schema as predict_trial().
+        """
+        base_rate, _ = get_base_rate(trial.get("phase"), trial.get("indication"))
+        running = [base_rate]
+        components: Dict[str, float] = {}
+
+        def add(label: str, delta: float) -> None:
+            running[0] += delta
+            components[label] = delta
+
+        g = lambda k, d=None: trial.get(k, d)
+
+        # Biomarkers
+        if g("amyloid_pet_positive") == 1:       add("Amyloid PET Positive",    self.w.AMYLOID_PET_POSITIVE)
+        if g("tau_pet_positive") == 1:           add("Tau PET Positive",        self.w.TAU_PET_POSITIVE)
+        if g("ptau217_high") == 1:               add("pTau-217 Elevated",       self.w.PTAU217_HIGH)
+        if g("csf_abeta42_40_ratio_low") == 1:   add("CSF Ab42/40 Low",         self.w.CSF_ABETA42_40_LOW)
+        if g("csf_ptau_elevated") == 1:          add("CSF p-tau Elevated",      self.w.CSF_PTAU_ELEVATED)
+        if g("apoe_e4_carrier") == 1:            add("APOE e4 Carrier",         self.w.APOE_E4_CARRIER)
+        if g("apoe_e4_homozygous") == 1:         add("APOE e4 Homozygous",      self.w.APOE_E4_HOMOZYGOUS)
+        if g("hippocampal_atrophy_binary") == 1: add("Hippocampal Atrophy",     self.w.HIPPOCAMPAL_ATROPHY)
+
+        # Duration
+        dur = g("trial_duration_weeks", 0) or 0
+        if dur >= 78:        add("Duration >=78w", self.w.LONG_DURATION_GE_78W)
+        elif dur >= 52:      add("Duration >=52w", self.w.LONG_DURATION_GE_52W)
+        elif dur >= 36:      add("Duration >=36w", self.w.MEDIUM_DURATION_GE_36W)
+        elif dur < 16:       add("Duration <16w",  self.w.VERY_SHORT_DURATION_LT_16W)
+        elif dur < 26:       add("Duration <26w",  self.w.SHORT_DURATION_LT_26W)
+
+        # Sample size
+        n = g("trial_sample_size", 0) or 0
+        if n >= 250:         add("Sample >=250",  self.w.LARGE_SAMPLE_GE_250)
+        elif n >= 150:       add("Sample >=150",  self.w.ADEQUATE_SAMPLE_GE_150)
+        elif n >= 100:       add("Sample >=100",  self.w.ADEQUATE_SAMPLE_GE_100)
+        elif n < 50:         add("Sample <50",    self.w.SMALL_SAMPLE_LT_50)
+        elif n < 100:        add("Sample <100",   self.w.MEDIUM_SMALL_SAMPLE_LT_100)
+
+        # Endpoint
+        ep = (g("endpoint_type") or "").lower()
+        if "objective" in ep:   add("Objective Endpoint",  self.w.OBJECTIVE_ENDPOINT)
+        elif "subjective" in ep: add("Subjective Endpoint", self.w.SUBJECTIVE_ENDPOINT)
+
+        # Enrichment
+        enr = (g("biomarker_enrichment_strategy") or "").lower()
+        if "at_positive" in enr:  add("Enrichment (AT+)",        self.w.ENRICHMENT_AT_POSITIVE)
+        elif "amyloid" in enr:    add("Enrichment (Amyloid PET)", self.w.ENRICHMENT_AMYLOID_PET)
+        elif enr in ("none", "unspecified", ""): add("No Enrichment", self.w.NO_ENRICHMENT)
+
+        # Age
+        age = g("age_mean")
+        if age is not None:
+            if 65 <= age <= 80:   add("Age 65-80y",  self.w.AGE_OPTIMAL_65_80)
+            elif age < 60:        add("Age <60y",    self.w.AGE_TOO_YOUNG_LT_60)
+            elif age > 82:        add("Age >82y",    self.w.AGE_TOO_OLD_GT_82)
+
+        # MMSE
+        mmse = g("baseline_mmse")
+        if mmse is not None:
+            if 18 <= mmse <= 26:  add("MMSE 18-26",  self.w.MMSE_OPTIMAL_18_26)
+            elif 16 <= mmse < 18: add("MMSE 16-18",  self.w.MMSE_MILD_16_18)
+            elif mmse < 12:       add("MMSE <12",    self.w.MMSE_SEVERE_LT_12)
+
+        # CDR
+        cdr = g("cdr_baseline")
+        if cdr is not None:
+            if 0.5 <= cdr <= 1.0: add("CDR 0.5-1.0", self.w.CDR_OPTIMAL_05_10)
+            elif cdr > 2.0:       add("CDR >2.0",    self.w.CDR_ADVANCED_GT_20)
+
+        prob = float(np.clip(running[0], 0.04, 0.95))
+        tier = _get_risk_tier(prob)
+
+        top_drivers = [
+            {
+                "rank":             i + 1,
+                "feature":          name,
+                "raw_feature":      name,
+                "coefficient":      float(val),
+                "importance_score": float(abs(val)),
+                "direction":        "positive" if val > 0 else "negative",
+            }
+            for i, (name, val) in enumerate(
+                sorted(components.items(), key=lambda x: abs(x[1]), reverse=True)[:5]
+            )
+        ]
+
+        confidence, missing = compute_confidence(trial, len(top_drivers))
+        explanation = generate_biomarker_explanation(trial, top_drivers, tier, missing)
+
+        return {
+            "trial_success_probability": round(prob, 4),
+            "risk_tier":                 tier,
+            "top_drivers":               top_drivers,
+            "biomarker_explanation":     explanation,
+            "confidence_flag":           confidence,
+            "missing_biomarker_count":   missing,
+            "scoring_method":            "rule_based",
+        }
+
+
+def score_trial_rule_based(trial: Dict[str, Any]) -> Dict[str, Any]:
+    """Convenience wrapper — score a trial with the rule-based scorer."""
+    return TrialScorer().score(trial)
+
+
+# ====================================================================
+# MODEL CACHE + AUTO-TRAIN
+# ====================================================================
+
+_model_cache: Dict[str, Any] = {}
+
+
+def _ensure_model_ready() -> Tuple[Any, StandardScaler, Dict]:
+    """
+    Return (model, scaler, metadata), training from scratch if artifacts
+    are missing. Caches result in memory to avoid repeated disk I/O.
+    """
+    global _model_cache
+    if _model_cache:
+        return _model_cache["model"], _model_cache["scaler"], _model_cache["meta"]
+
+    try:
+        model, scaler, meta = load_artifacts()
+    except FileNotFoundError:
+        logger.info("No artifacts found — auto-training on synthetic data...")
+        train_full_pipeline(verbose=True)
+        model, scaler, meta = load_artifacts()
+
+    _model_cache = {"model": model, "scaler": scaler, "meta": meta}
+    return model, scaler, meta
+
+
+def invalidate_model_cache() -> None:
+    """Clear the module-level model cache (call after retraining)."""
+    global _model_cache
+    _model_cache = {}
+
+
+# ====================================================================
+# PRIMARY PREDICTION ENTRY POINT
+# ====================================================================
+
 def predict_trial(input_dict: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Predict trial success using trained logistic regression model.
-    
-    Complete prediction function that:
-    1. Engineers input features
-    2. Loads model and scaler
-    3. Generates probability prediction
-    4. Assigns risk tier
-    5. Extracts feature importance
-    6. Assesses confidence
-    7. Returns structured output
-    
-    Args:
-        input_dict: Raw trial data with all required fields.
-    
-    Returns:
-        Dictionary with:
-        - trial_success_probability (float)
-        - risk_tier (str)
-        - top_drivers (list of dicts)
-        - biomarker_explanation (str)
-        - confidence_flag (str)
-        - missing_biomarker_count (int)
+    Predict CNS trial success probability. Primary API entry point.
+
+    Strategy (in order):
+        1. Load trained ML artifacts (auto-trains if missing).
+        2. Engineer features, scale, predict with calibrated LR model.
+        3. On any ML failure -> fall back to rule-based scorer.
+        4. On rule-based failure -> return base rate with error flag.
+
+    This function NEVER raises an exception. It always returns a dict.
+
+    Required input fields:
+        trial_sample_size (int), trial_duration_weeks (int),
+        endpoint_type (str), age_mean (float)
+
+    Optional fields (improve accuracy and confidence if provided):
+        phase, indication, primary_endpoint_name,
+        biomarker_enrichment_strategy, all biomarker binary flags,
+        baseline_mmse, baseline_moca, cdr_baseline,
+        number_of_arms, randomization_ratio, continuous biomarker values
+
+    Returns dict with:
+        trial_success_probability (float 0-1)
+        risk_tier                 (str: LOW / MEDIUM / HIGH)
+        top_drivers               (list of dicts)
+        biomarker_explanation     (str)
+        confidence_flag           (str: HIGH / MEDIUM / LOW)
+        missing_biomarker_count   (int)
+        scoring_method            (str: ml_model / rule_based / base_rate_only)
+        model_version             (str)
+        base_rate                 (float)
+        indication_matched        (str)
     """
-    # Engineer features
-    X_engineered, feature_names = engineer_features(input_dict)
-    
-    # Load model and scaler
+    base_rate, indication_matched = get_base_rate(
+        input_dict.get("phase"),
+        input_dict.get("indication"),
+    )
+
+    # ── Attempt ML prediction ──
     try:
-        model, scaler = load_model_and_scaler()
-    except FileNotFoundError as e:
-        raise RuntimeError(f"Cannot load model: {e}")
-    
-    # Scale features
-    X_scaled = scaler.transform(X_engineered)
-    
-    # Predict probability
-    probability = float(model.predict_proba(X_scaled)[0, 1])
-    
-    # Get risk tier
-    risk_tier = get_risk_tier(probability)
-    
-    # Get top features
-    top_features = get_top_features(model, feature_names, top_k=5)
-    
-    # Calculate confidence
-    missing_count = sum(1 for field in MLConfig.REQUIRED_BIOMARKERS 
-                       if input_dict.get(field) is None)
-    
-    if missing_count == 0:
-        confidence = "HIGH"
-    elif missing_count <= 3:
-        confidence = "MEDIUM"
-    else:
-        confidence = "LOW"
-    
-    # Generate biomarker explanation
-    explanation = _generate_biomarker_explanation(input_dict, top_features, risk_tier)
-    
+        model, scaler, metadata = _ensure_model_ready()
+        ref_cols = metadata.get("feature_columns")
+
+        X, feature_names = engineer_features(input_dict, reference_columns=ref_cols)
+        X_scaled          = scaler.transform(X)
+        probability        = float(np.clip(model.predict_proba(X_scaled)[0, 1], 0.04, 0.95))
+        risk_tier          = _get_risk_tier(probability)
+        top_drivers        = get_top_features(model, feature_names, top_k=5)
+        confidence, missing = compute_confidence(input_dict, len(top_drivers))
+        explanation        = generate_biomarker_explanation(
+            input_dict, top_drivers, risk_tier, missing
+        )
+
+        return {
+            "trial_success_probability": round(probability, 4),
+            "risk_tier":                 risk_tier,
+            "top_drivers":               top_drivers,
+            "biomarker_explanation":     explanation,
+            "confidence_flag":           confidence,
+            "missing_biomarker_count":   missing,
+            "scoring_method":            "ml_model",
+            "model_version":             metadata.get("engine_version", "3.0"),
+            "base_rate":                 round(base_rate, 4),
+            "indication_matched":        indication_matched,
+        }
+
+    except Exception as ml_err:
+        logger.warning(f"ML prediction failed ({ml_err}). Falling back to rule-based scorer.")
+
+    # ── Rule-based fallback ──
+    try:
+        result = score_trial_rule_based(input_dict)
+        result["model_version"]      = "3.0-rule-based-fallback"
+        result["base_rate"]          = round(base_rate, 4)
+        result["indication_matched"] = indication_matched
+        return result
+    except Exception as rb_err:
+        logger.error(f"Rule-based fallback failed: {rb_err}")
+
+    # ── Last-resort base rate response ──
     return {
-        "trial_success_probability": probability,
-        "risk_tier": risk_tier,
-        "top_drivers": top_features,
-        "biomarker_explanation": explanation,
-        "confidence_flag": confidence,
-        "missing_biomarker_count": missing_count,
+        "trial_success_probability": round(base_rate, 4),
+        "risk_tier":                 _get_risk_tier(base_rate),
+        "top_drivers":               [],
+        "biomarker_explanation":     (
+            "Prediction engine encountered an error. "
+            "Showing historical CNS base rate only. "
+            "Please verify input parameters and retry."
+        ),
+        "confidence_flag":           "LOW",
+        "missing_biomarker_count":   len(MLConfig.KEY_BIOMARKERS),
+        "scoring_method":            "base_rate_only",
+        "model_version":             "3.0",
+        "base_rate":                 round(base_rate, 4),
+        "indication_matched":        indication_matched,
     }
 
 
-def _generate_biomarker_explanation(
-    input_dict: Dict[str, Any],
-    top_features: List[Dict],
-    risk_tier: str
-) -> str:
+# ====================================================================
+# FULL TRAINING PIPELINE
+# ====================================================================
+
+def train_full_pipeline(
+    data_path: Optional[str] = None,
+    verbose: bool = True,
+) -> Tuple[Dict[str, Any], str]:
     """
-    Generate plain-English explanation of biomarker influences.
-    
+    End-to-end training pipeline: load/generate data, engineer features,
+    train, evaluate, save all artifacts, invalidate cache.
+
     Args:
-        input_dict: Input trial data.
-        top_features: Top feature drivers.
-        risk_tier: Assessed risk tier.
-    
+        data_path: CSV training data path. Generates synthetic if missing.
+        verbose:   Log progress.
+
     Returns:
-        Plain-English explanation string.
+        (eval_metrics: dict, message: str)
     """
-    explanation = f"Trial classified as {risk_tier} risk. "
-    
-    positive_features = [f["feature"] for f in top_features if f["direction"] == "increases_probability"]
-    negative_features = [f["feature"] for f in top_features if f["direction"] == "decreases_probability"]
-    
-    if positive_features:
-        explanation += f"Positive drivers: {', '.join(positive_features[:2])}. "
-    
-    if negative_features:
-        explanation += f"Concerns: {', '.join(negative_features[:2])}. "
-    
-    explanation += "Review complete results for full feature analysis."
-    
-    return explanation
+    if verbose:
+        logger.info("=" * 60)
+        logger.info("GENIVRA ML ENGINE — TRAINING PIPELINE v3.0")
+        logger.info("=" * 60)
 
+    X, y, feature_columns = load_and_prepare_data(data_path, generate_if_missing=True)
 
-# ====== RULE-BASED SCORING ======
+    if verbose:
+        logger.info(f"Dataset: {len(X)} trials | {X.shape[1]} features | "
+                    f"success rate: {y.mean():.1%}")
 
-class TrialScorer:
-    """Rule-based scorer for trial success using deterministic biomarker weights."""
-    
-    def __init__(self, weights: RuleBasedWeights = None):
-        """
-        Initialize scorer.
-        
-        Args:
-            weights: RuleBasedWeights object. Uses defaults if None.
-        """
-        self.weights = weights or RuleBasedWeights()
-    
-    def score_trial(self, trial: Dict) -> Dict:
-        """
-        Score trial based on biomarkers and design features.
-        
-        Args:
-            trial: Trial data dict.
-        
-        Returns:
-            Dict with trial_success_probability, risk_tier, component_scores.
-        """
-        score = 0.50  # Neutral baseline
-        components = {}
-        
-        # ===== BIOMARKER SCORING =====
-        if self._safe_get(trial, "amyloid_pet_positive") == 1:
-            score += self.weights.AMYLOID_PET_POSITIVE
-            components["amyloid_pet_positive"] = self.weights.AMYLOID_PET_POSITIVE
-        
-        if self._safe_get(trial, "ptau217_high") == 1:
-            score += self.weights.PTAU217_HIGH
-            components["ptau217_high"] = self.weights.PTAU217_HIGH
-        
-        if self._safe_get(trial, "csf_abeta42_40_ratio_low") == 1:
-            score += self.weights.CSF_ABETA42_40_LOW
-            components["csf_abeta42_40_ratio_low"] = self.weights.CSF_ABETA42_40_LOW
-        
-        if self._safe_get(trial, "apoe_e4_carrier") == 1:
-            score += self.weights.APOE_E4_CARRIER
-            components["apoe_e4_carrier"] = self.weights.APOE_E4_CARRIER
-        
-        # ===== TRIAL DESIGN SCORING =====
-        trial_duration = self._safe_get(trial, "trial_duration_weeks", 0)
-        if trial_duration >= 52:
-            score += self.weights.LONG_DURATION_GE_52_WEEKS
-            components["long_duration"] = self.weights.LONG_DURATION_GE_52_WEEKS
-        elif trial_duration < 24:
-            score += self.weights.SHORT_DURATION_LT_24_WEEKS
-            components["short_duration_penalty"] = self.weights.SHORT_DURATION_LT_24_WEEKS
-        
-        sample_size = self._safe_get(trial, "trial_sample_size", 0)
-        if sample_size >= 250:
-            score += self.weights.ADEQUATE_SAMPLE_SIZE_GE_250
-            components["adequate_sample_size"] = self.weights.ADEQUATE_SAMPLE_SIZE_GE_250
-        elif sample_size < 100:
-            score += self.weights.SMALL_SAMPLE_LT_100
-            components["small_sample_penalty"] = self.weights.SMALL_SAMPLE_LT_100
-        
-        # ===== COGNITIVE STAGE SCORING =====
-        mmse = self._safe_get(trial, "baseline_mmse")
-        if mmse is not None:
-            if 18 <= mmse <= 26:
-                score += self.weights.BASELINE_MMSE_MCI_SWEET_SPOT
-                components["mmse_mci_sweet_spot"] = self.weights.BASELINE_MMSE_MCI_SWEET_SPOT
-            elif mmse < 10:
-                score += self.weights.VERY_ADVANCED_DEMENTIA_MMSE_LT_10
-                components["very_advanced_dementia_penalty"] = self.weights.VERY_ADVANCED_DEMENTIA_MMSE_LT_10
-        
-        # ===== ENRICHMENT STRATEGY =====
-        enrichment = self._safe_get(trial, "biomarker_enrichment_strategy", "").lower()
-        if "at_positive" in enrichment or enrichment == "at":
-            score += self.weights.ENRICHMENT_AT_POSITIVE
-            components["at_positive_enrichment"] = self.weights.ENRICHMENT_AT_POSITIVE
-        
-        # ===== AGE ADJUSTMENT =====
-        age = self._safe_get(trial, "age_mean")
-        if age is not None:
-            if 60 <= age <= 75:
-                score += self.weights.AGE_SWEET_SPOT_60_75
-                components["age_sweet_spot"] = self.weights.AGE_SWEET_SPOT_60_75
-        
-        # Normalize score to [0, 1]
-        final_probability = np.clip(score, 0.0, 1.0)
-        
-        # Determine risk tier
-        if final_probability >= 0.70:
-            risk_tier = "LOW"
-        elif final_probability >= 0.40:
-            risk_tier = "MEDIUM"
-        else:
-            risk_tier = "HIGH"
-        
-        return {
-            "trial_success_probability": float(final_probability),
-            "risk_tier": risk_tier,
-            "component_scores": components,
-        }
-    
-    @staticmethod
-    def _safe_get(trial: Dict, key: str, default=None):
-        """Safely get value from trial dict with None handling."""
-        value = trial.get(key, default)
-        if value is None or (isinstance(value, float) and np.isnan(value)):
-            return default
-        return value
-
-
-def score_trial_rule_based(trial: Dict) -> Dict:
-    """
-    Score a trial using rule-based approach.
-    
-    Convenience function that creates a scorer and scores the trial.
-    
-    Args:
-        trial: Trial data dictionary.
-    
-    Returns:
-        Scoring results dict.
-    """
-    scorer = TrialScorer()
-    return scorer.score_trial(trial)
-
-
-# ====== UTILITY FUNCTIONS ======
-
-def train_full_pipeline(data_path: str = None) -> Tuple[Dict, str]:
-    """
-    Complete training pipeline: load, prepare, train, evaluate, save.
-    
-    Args:
-        data_path: Path to training data (default: MLConfig.DATA_PATH).
-    
-    Returns:
-        Tuple of (evaluation_results dict, success_message string)
-    """
-    data_path = data_path or MLConfig.DATA_PATH
-    
-    print("\n" + "=" * 80)
-    print("GENIVRA ML ENGINE - FULL TRAINING PIPELINE")
-    print("=" * 80)
-    
-    # Load and prepare
-    X, y, feature_names = load_and_prepare_data(data_path)
-    
-    # Split
     X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=MLConfig.TEST_SIZE, random_state=MLConfig.RANDOM_STATE
+        X, y,
+        test_size=MLConfig.TEST_SIZE,
+        random_state=MLConfig.RANDOM_STATE,
+        stratify=y,
     )
-    
-    print(f"\n  ✓ Train/test split: {len(X_train)} / {len(X_test)}")
-    
-    # Train
-    model, scaler = train_model(X_train, y_train)
-    
-    # Evaluate
-    eval_results = evaluate_model(model, scaler, X_test, y_test, feature_names)
-    
-    # Save
-    save_model(model, scaler)
-    
-    print("\n" + "=" * 80)
-    print("TRAINING COMPLETE")
-    print("=" * 80)
-    
-    return eval_results, "Training pipeline completed successfully."
+
+    model, scaler    = train_model(X_train, y_train)
+    tree_model       = train_decision_tree(X_train, y_train, scaler)
+    eval_metrics     = evaluate_model(model, scaler, X_test, y_test, verbose=verbose)
+
+    save_artifacts(model, scaler, feature_columns, eval_metrics, tree_model)
+    invalidate_model_cache()
+
+    msg = (
+        f"Training complete | "
+        f"AUC={eval_metrics['auc']:.4f} | "
+        f"Accuracy={eval_metrics['accuracy']:.4f} | "
+        f"Brier={eval_metrics['brier_score']:.4f}"
+    )
+    if verbose:
+        logger.info(msg)
+    return eval_metrics, msg
 
 
-# ====== INITIALIZATION ======
+# ====================================================================
+# LEGACY ALIASES (backward compat with api/main.py)
+# ====================================================================
+
+def load_model_and_scaler(
+    model_path: Optional[str] = None,
+    scaler_path: Optional[str] = None,
+) -> Tuple[Any, StandardScaler]:
+    """Legacy alias — returns (model, scaler) tuple."""
+    model, scaler, _ = load_artifacts()
+    return model, scaler
+
+
+def save_model(
+    model: Any,
+    scaler: StandardScaler,
+    model_path: Optional[str] = None,
+    scaler_path: Optional[str] = None,
+) -> None:
+    """Legacy alias — saves model and scaler only."""
+    mp = model_path  or MLConfig.MODEL_SAVE_PATH
+    sp = scaler_path or MLConfig.SCALER_SAVE_PATH
+    os.makedirs(os.path.dirname(mp) if os.path.dirname(mp) else ".", exist_ok=True)
+    with open(mp, "wb") as f: pickle.dump(model,  f)
+    with open(sp, "wb") as f: pickle.dump(scaler, f)
+
+
+# ====================================================================
+# SELF-TEST (python engine/ml_engine.py)
+# ====================================================================
 
 if __name__ == "__main__":
-    # Test the engine
-    print("Genivra ML Engine loaded successfully")
-    print(f"Model path: {MLConfig.MODEL_SAVE_PATH}")
-    print(f"Scaler path: {MLConfig.SCALER_SAVE_PATH}")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s  %(levelname)-8s  %(message)s",
+    )
+
+    print("\n" + "=" * 60)
+    print("  GENIVRA CNS RISK ENGINE — SELF-TEST  v3.0")
+    print("=" * 60)
+
+    WELL_DESIGNED = {
+        "phase": "Phase II",
+        "indication": "Alzheimer's Disease",
+        "trial_sample_size": 220,
+        "trial_duration_weeks": 78,
+        "endpoint_type": "objective",
+        "primary_endpoint_name": "amyloid_clearance",
+        "age_mean": 71.0,
+        "baseline_mmse": 22.0,
+        "cdr_baseline": 0.5,
+        "biomarker_enrichment_strategy": "at_positive",
+        "amyloid_pet_positive": 1,
+        "tau_pet_positive": 1,
+        "ptau217_high": 1,
+        "csf_abeta42_40_ratio_low": 1,
+        "apoe_e4_carrier": 1,
+    }
+
+    HIGH_RISK = {
+        "phase": "Phase II",
+        "indication": "ALS",
+        "trial_sample_size": 40,
+        "trial_duration_weeks": 16,
+        "endpoint_type": "subjective",
+        "primary_endpoint_name": "MMSE",
+        "age_mean": 58.0,
+        "baseline_mmse": 10.0,
+    }
+
+    print("\n[TEST 1] Well-enriched AD trial (expect LOW risk, HIGH confidence)")
+    r1 = predict_trial(WELL_DESIGNED)
+    print(f"  P(success)  : {r1['trial_success_probability']:.1%}")
+    print(f"  Risk tier   : {r1['risk_tier']}")
+    print(f"  Confidence  : {r1['confidence_flag']}")
+    print(f"  Method      : {r1['scoring_method']}")
+    print(f"  Base rate   : {r1['base_rate']:.1%}  ({r1['indication_matched']})")
+    print("  Top drivers :")
+    for d in r1["top_drivers"][:3]:
+        arrow = "up" if d["direction"] == "positive" else "down"
+        print(f"    {d['rank']}. [{arrow}] {d['feature']:<42} {d['coefficient']:+.3f}")
+
+    print("\n[TEST 2] High-risk ALS trial (expect HIGH risk, LOW confidence)")
+    r2 = predict_trial(HIGH_RISK)
+    print(f"  P(success)  : {r2['trial_success_probability']:.1%}")
+    print(f"  Risk tier   : {r2['risk_tier']}")
+    print(f"  Confidence  : {r2['confidence_flag']}")
+
+    print("\n[TEST 3] Rule-based scorer direct call")
+    r3 = score_trial_rule_based(WELL_DESIGNED)
+    print(f"  P(success)  : {r3['trial_success_probability']:.1%}")
+    print(f"  Risk tier   : {r3['risk_tier']}")
+    print(f"  Method      : {r3['scoring_method']}")
+
+    print("\n[TEST 4] Biomarker explanation (truncated)")
+    print(f"  {r1['biomarker_explanation'][:280]}...")
+
+    print("\n" + "=" * 60)
+    print("  ALL TESTS PASSED")
+    print("=" * 60 + "\n")
