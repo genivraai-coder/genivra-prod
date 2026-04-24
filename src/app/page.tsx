@@ -4,6 +4,7 @@ import FloatingKeywords from "@/components/FloatingKeywords";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { FeatureGrid, HOME_FEATURES } from "@/components/ui/feature";
+import ResearchSupportedBy from "@/components/ResearchSupportedBy";
 
 const METRICS = [
   { value: "450+", label: "Trials Managed" },
@@ -105,6 +106,8 @@ export default function Home() {
           </div>
         </div>
       </section>
+
+      <ResearchSupportedBy />
 
       {/* INDICATION MARQUEE */}
       <section className="relative border-y border-white/[0.06] bg-[var(--surface)]/60 py-5 sm:py-6">
