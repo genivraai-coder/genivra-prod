@@ -1,6 +1,6 @@
 # Genivra API
 
-REST API layer for the Genivra CNS Risk Engine ML models.
+This folder contains the REST API for serving trial predictions. Start with `API/main.py` first.
 
 **Status:** Production Ready  
 **Version:** 1.0.0  

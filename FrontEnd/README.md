@@ -1,5 +1,7 @@
 # Genivra Dashboard - Quick Start
 
+This folder contains the dashboard UI and the files needed to run the frontend locally.
+
 ## Open Dashboard
 
 ### Option 1: Direct File (Easiest)

@@ -5,11 +5,11 @@ This tests the API directly without needing a running server.
 """
 
 import json
-import sys
+import sys, os
 from fastapi.testclient import TestClient
 
 # Add project to path
-sys.path.insert(0, 'c:/Users/andre/Downloads/Projects/Genivra.ai')
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 from API.main import app
 
