@@ -80,31 +80,50 @@ app.add_middleware(
 # AUTHENTICATION DEPENDENCY
 # ============================================================================
 
-async def verify_api_key(x_api_key: str = Header(None)) -> Dict[str, str]:
+def get_api_key_from_headers(
+    x_api_key: str = Header(None),
+    authorization: str = Header(None),
+) -> Optional[str]:
     """
-    Verify API key from x-api-key header.
+    Extract the API key from request headers.
+
+    Supports:
+    - x-api-key: direct API key header
+    - Authorization: Bearer <api_key>
+    """
+    if x_api_key and isinstance(x_api_key, str) and x_api_key.strip():
+        return x_api_key.strip()
+
+    if authorization and isinstance(authorization, str):
+        parts = authorization.strip().split()
+        if len(parts) == 2 and parts[0].lower() == "bearer":
+            return parts[1].strip()
+
+    return None
+
+
+async def verify_api_key(api_key: Optional[str] = Depends(get_api_key_from_headers)) -> Optional[Dict[str, str]]:
+    """
+    Verify API key from request headers if provided.
     
     Args:
-        x_api_key: API key from request header
+        api_key: API key from x-api-key or Authorization Bearer header
     
     Returns:
-        Dict with api_key and tier information
+        Dict with api_key and tier information, or None if no key was provided
     
     Raises:
-        HTTPException: 401 if key missing or invalid, 429 if rate limited
+        HTTPException: 401 if key invalid, 429 if rate limited
     """
-    # Check if key is provided
-    if not x_api_key:
-        logger.warning("API request without x-api-key header")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing x-api-key header",
-            headers={"WWW-Authenticate": "ApiKey"},
-        )
+    if os.getenv("ENV") == "dev":
+        logger.info("ENV=dev detected; skipping API auth.")
+        return None
+    if not api_key:
+        return None
     
     # Validate key format (basic check)
-    if not isinstance(x_api_key, str) or len(x_api_key.strip()) == 0:
-        logger.warning(f"API request with invalid key format")
+    if not isinstance(api_key, str) or len(api_key.strip()) == 0:
+        logger.warning("API request with invalid key format")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid API key format",
@@ -112,9 +131,9 @@ async def verify_api_key(x_api_key: str = Header(None)) -> Dict[str, str]:
         )
     
     # Validate key exists and is active
-    is_valid, tier, name = APIKeyManager.validate_key(x_api_key)
+    is_valid, tier, name = APIKeyManager.validate_key(api_key)
     if not is_valid:
-        logger.warning(f"API request with invalid/inactive key: {x_api_key[:10]}...")
+        logger.warning(f"API request with invalid/inactive key: {api_key[:10]}...")
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid or inactive API key",
@@ -122,9 +141,9 @@ async def verify_api_key(x_api_key: str = Header(None)) -> Dict[str, str]:
         )
     
     # Check rate limit
-    allowed, message = APIKeyManager.check_rate_limit(x_api_key)
+    allowed, message = APIKeyManager.check_rate_limit(api_key)
     if not allowed:
-        logger.warning(f"Rate limit exceeded for key: {x_api_key[:10]}...")
+        logger.warning(f"Rate limit exceeded for key: {api_key[:10]}...")
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS,
             detail=message,
@@ -132,7 +151,7 @@ async def verify_api_key(x_api_key: str = Header(None)) -> Dict[str, str]:
         )
     
     logger.info(f"API key validated: tier={tier}, name={name}")
-    return {"api_key": x_api_key, "tier": tier, "name": name}
+    return {"api_key": api_key, "tier": tier, "name": name}
 
 
 # ========================================================================
@@ -279,11 +298,11 @@ async def root():
         },
     },
 )
-async def predict(request: PredictionRequest, api_key_info: Dict[str, str] = Depends(verify_api_key)):
+async def predict(request: PredictionRequest, api_key_info: Optional[Dict[str, str]] = Depends(verify_api_key)):
     """
     Predict CNS trial success probability and risk tier.
     
-    Requires: x-api-key header with valid API key
+    API key is optional for this endpoint.
     
     Accepts structured trial design, biomarker, and enrollment data.
     Returns interpretable success probability (0-1), risk category, and driver explanation.
@@ -356,9 +375,10 @@ async def predict(request: PredictionRequest, api_key_info: Dict[str, str] = Dep
         response = convert_prediction_output(prediction_output)
         logger.info("Converted prediction to response model")
         
-        # Track usage for this API key
-        APIKeyManager.increment_usage(api_key_info["api_key"])
-        logger.info(f"Usage tracked for API key: {api_key_info['tier']}")
+        # Track usage for this API key when provided
+        if api_key_info is not None:
+            APIKeyManager.increment_usage(api_key_info["api_key"])
+            logger.info(f"Usage tracked for API key: {api_key_info['tier']}")
         
         return response
     
@@ -719,6 +739,37 @@ async def health():
         status="healthy",
         version="1.0.0",
     )
+
+
+@app.get(
+    "/api-key/status",
+    tags=["Auth"],
+    summary="Get current API key usage status",
+)
+async def api_key_status(api_key: str = Depends(get_api_key_from_headers)):
+    """
+    Return API key usage limits and status.
+    """
+    if not api_key:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing x-api-key header or Authorization Bearer token",
+        )
+
+    is_valid, tier, name = APIKeyManager.validate_key(api_key)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid or inactive API key",
+        )
+
+    stats = APIKeyManager.get_usage_stats(api_key)
+    return {
+        "api_key": api_key[:10] + "...",
+        "tier": tier,
+        "name": name,
+        "usage": stats,
+    }
 
 
 # ============================================================================

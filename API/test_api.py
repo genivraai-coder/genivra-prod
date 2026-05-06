@@ -24,6 +24,20 @@ from API.main import app
 # ============================================================================
 
 client = TestClient(app)
+DEFAULT_AUTH_HEADERS = {"Authorization": "Bearer demo_tier2_key_67890"}
+
+
+def auth_headers(extra=None):
+    headers = DEFAULT_AUTH_HEADERS.copy()
+    if extra:
+        headers.update(extra)
+    return headers
+
+
+def auth_post(path, json=None, **kwargs):
+    headers = auth_headers(kwargs.pop("headers", None))
+    return client.post(path, json=json, headers=headers, **kwargs)
+
 
 
 # ============================================================================
@@ -99,6 +113,30 @@ class TestHealth:
         assert "timestamp" in data
 
 
+class TestApiKeyAuth:
+    """Test API key authentication and usage status endpoints."""
+
+    def test_authorization_bearer_header_works(self):
+        response = client.post(
+            "/predict",
+            json=VALID_REQUEST,
+            headers={"Authorization": "Bearer demo_tier2_key_67890"}
+        )
+        assert response.status_code == 200
+
+    def test_api_key_status_endpoint(self):
+        response = client.get(
+            "/api-key/status",
+            headers={"x-api-key": "demo_tier2_key_67890"}
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["tier"] == "tier_2"
+        assert data["usage"]["api_key"] == "demo_tier2_key_67890"
+        assert "current_usage" in data["usage"]
+        assert "remaining" in data["usage"]
+
+
 # ============================================================================
 # Prediction Tests
 # ============================================================================
@@ -108,7 +146,7 @@ class TestPredictions:
     
     def test_valid_prediction(self):
         """Test POST /predict with valid input."""
-        response = client.post("/predict", json=VALID_REQUEST)
+        response = auth_post("/predict", json=VALID_REQUEST)
         assert response.status_code == 200
         
         data = response.json()
@@ -139,7 +177,7 @@ class TestPredictions:
     
     def test_minimal_request(self):
         """Test prediction with minimal input."""
-        response = client.post("/predict", json=MINIMAL_REQUEST)
+        response = auth_post("/predict", json=MINIMAL_REQUEST)
         assert response.status_code == 200
         data = response.json()
         assert "trial_success_probability" in data
@@ -155,7 +193,7 @@ class TestPredictions:
             "biomarkers": {},
             "enrollment": {"age_mean": 70.0}
         }
-        response = client.post("/predict", json=invalid_request)
+        response = auth_post("/predict", json=invalid_request)
         assert response.status_code == 400
         assert "error" in response.json()
     
@@ -169,7 +207,7 @@ class TestPredictions:
             "biomarkers": {},
             "enrollment": {"age_mean": 70.0}
         }
-        response = client.post("/predict", json=invalid_request)
+        response = auth_post("/predict", json=invalid_request)
         assert response.status_code == 400
     
     def test_missing_enrollment(self):
@@ -185,42 +223,42 @@ class TestPredictions:
             },
             "biomarkers": {}
         }
-        response = client.post("/predict", json=invalid_request)
+        response = auth_post("/predict", json=invalid_request)
         assert response.status_code == 400
     
     def test_invalid_sample_size(self):
         """Test validation of sample size > 0."""
         invalid_request = MINIMAL_REQUEST.copy()
         invalid_request["trial_design"]["trial_sample_size"] = 0
-        response = client.post("/predict", json=invalid_request)
+        response = auth_post("/predict", json=invalid_request)
         assert response.status_code == 422  # Pydantic validation error
     
     def test_invalid_duration(self):
         """Test validation of duration > 0."""
         invalid_request = MINIMAL_REQUEST.copy()
         invalid_request["trial_design"]["trial_duration_weeks"] = -10
-        response = client.post("/predict", json=invalid_request)
+        response = auth_post("/predict", json=invalid_request)
         assert response.status_code == 422
     
     def test_invalid_endpoint_type(self):
         """Test validation of endpoint_type enum."""
         invalid_request = MINIMAL_REQUEST.copy()
         invalid_request["endpoints"]["endpoint_type"] = "invalid_type"
-        response = client.post("/predict", json=invalid_request)
+        response = auth_post("/predict", json=invalid_request)
         assert response.status_code == 422
     
     def test_invalid_mmse_range(self):
         """Test validation of MMSE in range 0-30."""
         invalid_request = MINIMAL_REQUEST.copy()
         invalid_request["enrollment"]["baseline_mmse"] = 35
-        response = client.post("/predict", json=invalid_request)
+        response = auth_post("/predict", json=invalid_request)
         assert response.status_code == 422
     
     def test_invalid_cdr_range(self):
         """Test validation of CDR in range 0-18."""
         invalid_request = MINIMAL_REQUEST.copy()
         invalid_request["enrollment"]["cdr_baseline"] = 20
-        response = client.post("/predict", json=invalid_request)
+        response = auth_post("/predict", json=invalid_request)
         assert response.status_code == 422
     
     def test_biomarker_optional(self):
@@ -239,7 +277,7 @@ class TestPredictions:
             },
             "enrollment": {"age_mean": 70.0}
         }
-        response = client.post("/predict", json=request_no_biomarkers)
+        response = auth_post("/predict", json=request_no_biomarkers)
         assert response.status_code == 200
 
 
@@ -252,7 +290,7 @@ class TestRiskTiers:
     
     def test_high_success_low_risk(self):
         """Test high-success, low-risk scenario."""
-        response = client.post("/predict", json=VALID_REQUEST)
+        response = auth_post("/predict", json=VALID_REQUEST)
         assert response.status_code == 200
         data = response.json()
         
@@ -266,7 +304,7 @@ class TestRiskTiers:
         # Success prob 0.40-0.69 → MEDIUM risk
         # Success prob < 0.40 → HIGH risk
         
-        response = client.post("/predict", json=VALID_REQUEST)
+        response = auth_post("/predict", json=VALID_REQUEST)
         data = response.json()
         
         prob = data["trial_success_probability"]
@@ -289,13 +327,13 @@ class TestConfidenceFlags:
     
     def test_high_confidence_all_biomarkers(self):
         """Test HIGH confidence with all required biomarkers."""
-        response = client.post("/predict", json=VALID_REQUEST)
+        response = auth_post("/predict", json=VALID_REQUEST)
         data = response.json()
         assert "confidence_flag" in data
     
     def test_missing_biomarker_count(self):
         """Test missing_biomarker_count field."""
-        response = client.post("/predict", json=MINIMAL_REQUEST)
+        response = auth_post("/predict", json=MINIMAL_REQUEST)
         data = response.json()
         assert "missing_biomarker_count" in data
         assert isinstance(data["missing_biomarker_count"], int)
@@ -311,7 +349,7 @@ class TestResponseFormat:
     
     def test_timestamp_format(self):
         """Test timestamp is ISO 8601."""
-        response = client.post("/predict", json=MINIMAL_REQUEST)
+        response = auth_post("/predict", json=MINIMAL_REQUEST)
         data = response.json()
         timestamp = data["generated_timestamp"]
         
@@ -322,7 +360,7 @@ class TestResponseFormat:
     
     def test_feature_drivers_sorted_by_impact(self):
         """Test that top drivers are sorted by impact."""
-        response = client.post("/predict", json=VALID_REQUEST)
+        response = auth_post("/predict", json=VALID_REQUEST)
         data = response.json()
         drivers = data["top_drivers"]
         
@@ -333,7 +371,7 @@ class TestResponseFormat:
     
     def test_biomarker_explanation_not_empty(self):
         """Test that biomarker explanation is non-empty."""
-        response = client.post("/predict", json=VALID_REQUEST)
+        response = auth_post("/predict", json=VALID_REQUEST)
         data = response.json()
         assert len(data["biomarker_explanation"]) > 0
 
@@ -347,7 +385,7 @@ class TestContentType:
     
     def test_json_content_type(self):
         """Test response has JSON content type."""
-        response = client.post(
+        response = auth_post(
             "/predict",
             json=MINIMAL_REQUEST,
             headers={"Content-Type": "application/json"}
@@ -359,7 +397,10 @@ class TestContentType:
         response = client.post(
             "/predict",
             content=b"not valid json",
-            headers={"Content-Type": "application/json"}
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": "Bearer demo_tier2_key_67890",
+            }
         )
         assert response.status_code == 422
 

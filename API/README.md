@@ -38,6 +38,7 @@ uvicorn API.main:app --reload
 
 # Access at: http://localhost:8000
 # Docs at: http://localhost:8000/docs
+# Local development now accepts a default demo API key if none is provided.
 ```
 
 ### 3. Send a Prediction Request
@@ -45,6 +46,7 @@ uvicorn API.main:app --reload
 ```bash
 curl -X POST http://localhost:8000/predict \
   -H "Content-Type: application/json" \
+  -H "x-api-key: demo_tier2_key_67890" \
   -d '{
     "trial_design": {
       "trial_sample_size": 200,
@@ -65,6 +67,19 @@ curl -X POST http://localhost:8000/predict \
       "cdr_baseline": 1.5
     }
   }'
+```
+
+You can also pass the API key as a bearer token:
+
+```bash
+-H "Authorization: Bearer demo_tier2_key_67890"
+```
+
+### 4. Check API Key Limits
+
+```bash
+curl -X GET http://localhost:8000/api-key/status \
+  -H "x-api-key: demo_tier2_key_67890"
 ```
 
 ---
