@@ -19,7 +19,7 @@ Version: 1.0
 import os
 import pickle
 from typing import Dict, Any, Optional, Tuple, List
-from datetime import datetime
+from datetime import datetime, timezone
 
 import numpy as np
 import pandas as pd
@@ -551,7 +551,7 @@ def predict_trial(input_dict: Dict[str, Any]) -> Dict[str, Any]:
             "trial_success_probability": None,
             "risk_tier": "ERROR",
             "confidence_flag": "ERROR",
-            "generated_timestamp": datetime.utcnow().isoformat() + "Z",
+            "generated_timestamp": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         }
 
 
