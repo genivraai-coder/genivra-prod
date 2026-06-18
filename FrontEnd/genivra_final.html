@@ -1,0 +1,1499 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>GENIVRA | CNS Risk Intelligence Platform</title>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+<style>
+
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Inter',sans-serif;}
+
+:root{
+
+/* Core Colors */
+--bg:#05070b;
+--bg-secondary:#0b0f17;
+--panel:#101722;
+--panel-hover:#141d2b;
+
+--primary:#26d07c;
+--primary-hover:#1fb66b;
+
+--accent:#4da3ff;
+
+--text:#f8fafc;
+--text-secondary:#94a3b8;
+
+--border:rgba(255,255,255,.08);
+
+--shadow:
+0 10px 40px rgba(0,0,0,.35);
+
+--radius:20px;
+
+}
+
+body{
+background:
+linear-gradient(
+180deg,
+#05070b 0%,
+#0a0f18 100%
+);
+
+color:var(--text);
+
+min-height:100vh;
+
+overflow-x:hidden;
+
+font-family:'Inter',sans-serif;
+}
+
+body::before{
+content:"";
+position:fixed;
+inset:0;
+pointer-events:none;
+
+background:
+radial-gradient(
+circle at top center,
+rgba(38,208,124,.08),
+transparent 50%
+);
+}
+
+/* Layout */
+
+.container{
+display:flex;
+min-height:100vh;
+}
+
+/* Sidebar */
+
+.sidebar{
+
+width:280px;
+
+background:
+rgba(10,15,24,.95);
+
+border-right:
+1px solid var(--border);
+
+padding:32px 24px;
+
+backdrop-filter:blur(24px);
+}
+
+/* Logo */
+
+.logo{
+
+display:flex;
+align-items:center;
+
+gap:14px;
+
+margin-bottom:48px;
+}
+
+.logo-badge{
+
+width:44px;
+height:44px;
+
+border-radius:12px;
+
+background:
+linear-gradient(
+135deg,
+#26d07c,
+#6be5a6
+);
+}
+
+.logo h1{
+
+font-size:22px;
+font-weight:800;
+
+letter-spacing:.5px;
+}
+
+.logo span{
+
+display:block;
+
+margin-top:4px;
+
+font-size:11px;
+
+color:var(--text-secondary);
+
+letter-spacing:1.5px;
+}
+
+/* Navigation */
+
+.nav-item{
+
+display:flex;
+
+align-items:center;
+
+gap:12px;
+
+padding:14px 16px;
+
+border-radius:14px;
+
+cursor:pointer;
+
+margin-bottom:8px;
+
+transition:.2s ease;
+}
+
+.nav-item:hover{
+
+background:
+rgba(255,255,255,.04);
+}
+
+.nav-item.active{
+
+background:
+rgba(38,208,124,.12);
+
+border:
+1px solid rgba(38,208,124,.18);
+}
+
+.nav-label{
+
+font-size:14px;
+font-weight:600;
+}
+
+/* Main */
+
+.main{
+
+flex:1;
+
+padding:48px;
+}
+
+/* Header */
+
+.topbar{
+
+display:flex;
+
+justify-content:space-between;
+
+align-items:center;
+
+margin-bottom:40px;
+}
+
+.title h2{
+
+font-size:42px;
+
+font-weight:800;
+
+letter-spacing:-1px;
+
+margin-bottom:8px;
+}
+
+.title p{
+
+color:var(--text-secondary);
+
+font-size:15px;
+}
+
+/* Status Badge */
+
+.status{
+
+padding:10px 16px;
+
+border-radius:999px;
+
+background:
+rgba(38,208,124,.12);
+
+border:
+1px solid rgba(38,208,124,.2);
+
+color:
+#6be5a6;
+
+font-size:13px;
+
+font-weight:700;
+}
+
+/* Cards */
+
+.card{
+
+background:
+var(--panel);
+
+border:
+1px solid var(--border);
+
+border-radius:
+var(--radius);
+
+padding:30px;
+
+box-shadow:
+var(--shadow);
+
+transition:.25s ease;
+}
+
+.card:hover{
+
+border-color:
+rgba(38,208,124,.18);
+
+transform:
+translateY(-2px);
+}
+
+.card h3{
+
+font-size:22px;
+
+font-weight:700;
+
+margin-bottom:10px;
+}
+
+.card-sub{
+
+font-size:14px;
+
+color:var(--text-secondary);
+
+margin-bottom:24px;
+}
+
+.tier-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:18px;}
+
+.tier{
+position:relative;
+background:linear-gradient(
+180deg,
+rgba(11,20,35,.95),
+rgba(5,10,20,.98)
+);
+border:1px solid rgba(255,255,255,.06);
+border-radius:24px;
+padding:24px;
+overflow:hidden;
+transition:.35s;
+}
+.tier:hover{transform:translateY(-8px);border-color:rgba(47,217,255,.25);box-shadow:var(--glow);}
+
+.tier::before{
+content:"";
+position:absolute;
+top:-120px;
+right:-80px;
+width:240px;
+height:240px;
+background:radial-gradient(circle,rgba(47,217,255,.18),transparent 70%);
+}
+
+.plan{font-size:20px;font-weight:800;margin-bottom:12px;}
+
+.price{font-size:40px;font-weight:800;margin-bottom:6px;}
+.price small{font-size:14px;color:var(--muted);}
+
+.desc{color:var(--muted);font-size:14px;margin-bottom:22px;line-height:1.7;}
+
+.feature{display:flex;gap:10px;margin-bottom:12px;font-size:14px;color:#d9e6ff;}
+.check{color:var(--cyan);font-weight:700;}
+
+.btn{margin-top:24px;width:100%;padding:14px;border:none;border-radius:16px;cursor:pointer;font-weight:700;font-size:14px;transition:.28s;}
+
+.primary{background:linear-gradient(135deg,var(--cyan),var(--blue));color:white;box-shadow:var(--glow);}
+.primary:hover{transform:translateY(-3px);}
+
+.secondary{background:rgba(255,255,255,.05);color:var(--text);border:1px solid rgba(255,255,255,.08);}
+
+.metrics{display:grid;grid-template-columns:repeat(2,1fr);gap:18px;margin-top:28px;}
+
+.metric{background:rgba(255,255,255,.03);border:1px solid var(--border);padding:22px;border-radius:20px;}
+
+.metric-label{color:var(--muted);font-size:13px;margin-bottom:12px;}
+.metric-value{font-size:34px;font-weight:800;}
+.metric-change{margin-top:10px;color:#58ffba;font-size:13px;}
+
+/* SECTIONS */
+.section{display:none;opacity:0;transition:opacity .3s ease;}
+.section.active{display:block;opacity:1;}
+
+.section-title{font-size:36px;font-weight:800;margin-bottom:8px;}
+.section-subtitle{color:var(--muted);margin-bottom:28px;}
+
+.form-section{display:grid;grid-template-columns:repeat(2,1fr);gap:24px;margin-bottom:28px;}
+
+.form-group{display:flex;flex-direction:column;gap:8px;}
+.form-group.full{grid-column:1/-1;}
+
+.form-label{font-size:13px;font-weight:600;color:var(--text);text-transform:uppercase;letter-spacing:.5px;}
+
+.form-input,.form-select,.form-textarea{
+padding:14px 16px;
+border-radius:16px;
+border:1px solid rgba(255,255,255,.08);
+background:rgba(255,255,255,.04);
+color:var(--text);
+font-size:14px;
+font-family:inherit;
+outline:none;
+transition:.28s;
+}
+
+.form-input:focus,.form-select:focus,.form-textarea:focus{
+border-color:rgba(47,217,255,.3);
+background:rgba(255,255,255,.06);
+box-shadow:0 0 20px rgba(47,217,255,.1);
+}
+
+.form-input::placeholder{color:var(--muted);}
+
+.form-textarea{grid-column:1/-1;resize:vertical;min-height:100px;}
+
+.upload-zone{
+grid-column:1/-1;
+border:2px dashed rgba(47,217,255,.3);
+border-radius:20px;
+padding:40px;
+text-align:center;
+cursor:pointer;
+transition:.28s;
+background:rgba(47,217,255,.05);
+}
+
+.upload-zone:hover{border-color:rgba(47,217,255,.5);background:rgba(47,217,255,.08);}
+
+.upload-icon{font-size:48px;margin-bottom:16px;}
+.upload-text{color:var(--text);font-weight:600;margin-bottom:4px;}
+.upload-hint{color:var(--muted);font-size:13px;}
+
+.chart-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:24px;}
+
+.chart-card{background:rgba(16,28,52,.82);border:1px solid var(--border);border-radius:28px;padding:28px;backdrop-filter:blur(24px);}
+
+.chart-card h4{font-size:18px;margin-bottom:20px;}
+
+.chart-placeholder{
+width:100%;
+height:240px;
+background:linear-gradient(135deg,rgba(47,217,255,.05),rgba(76,125,255,.05));
+border-radius:16px;
+display:flex;
+align-items:center;
+justify-content:center;
+color:var(--muted);
+font-size:14px;
+}
+
+@media(max-width:1200px){
+.dashboard-grid{grid-template-columns:1fr;}
+.tier-grid{grid-template-columns:1fr;}
+.form-section{grid-template-columns:1fr;}
+.form-group.full{grid-column:1;}
+.chart-grid{grid-template-columns:1fr;}
+}
+
+</style>
+</head>
+<body>
+
+<div class="container">
+
+<aside class="sidebar">
+
+<div class="logo">
+<div class="logo-badge"></div>
+<div>
+<h1>GENIVRA</h1>
+<span>CNS RISK INTELLIGENCE</span>
+</div>
+</div>
+
+<div class="nav-section">
+<div class="nav-title">Platform</div>
+<div class="nav-item active" data-section="dashboard">
+<div class="nav-icon">●</div>
+<div class="nav-label">Dashboard</div>
+</div>
+<div class="nav-item" data-section="prediction">
+<div class="nav-icon">◎</div>
+<div class="nav-label">Single Prediction</div>
+</div>
+<div class="nav-item" data-section="batch">
+<div class="nav-icon">▣</div>
+<div class="nav-label">Batch Upload</div>
+</div>
+<div class="nav-item" data-section="analytics">
+<div class="nav-icon">◈</div>
+<div class="nav-label">Analytics</div>
+</div>
+<div class="nav-item" data-section="settings">
+<div class="nav-icon">⚙</div>
+<div class="nav-label">API Settings</div>
+</div>
+</div>
+
+<div class="nav-section">
+<div class="nav-title">Account</div>
+<div class="nav-item">
+<div class="nav-icon">✦</div>
+<div class="nav-label">Subscription</div>
+</div>
+<div class="nav-item">
+<div class="nav-icon">⬢</div>
+<div class="nav-label">Billing</div>
+</div>
+</div>
+
+</aside>
+
+<main class="main">
+
+<!-- DASHBOARD SECTION -->
+<!-- DASHBOARD SECTION -->
+<div id="dashboard-section" class="section active">
+
+<div class="topbar">
+<div class="title">
+<h2>Clinical Diligence Platform</h2>
+<p>Analyze CNS clinical trials before they fail.</p>
+</div>
+
+<div class="user-panel">
+<div class="status">● MODEL ONLINE</div>
+<div class="avatar"></div>
+</div>
+</div>
+
+<div class="dashboard-grid">
+
+<div class="card">
+
+<h3>Genivra Intelligence Engine</h3>
+
+<div class="card-sub">
+AI-powered diligence for Alzheimer's, ALS, Parkinson's, Epilepsy, and other neurodegenerative programs.
+</div>
+
+<div class="metrics">
+
+<div class="metric">
+<div class="metric-label">Clinical Trials Indexed</div>
+<div class="metric-value">10,000+</div>
+<div class="metric-change">Historical CNS programs</div>
+</div>
+
+<div class="metric">
+<div class="metric-label">Model Accuracy</div>
+<div class="metric-value">73%</div>
+<div class="metric-change">Retrospective validation</div>
+</div>
+
+<div class="metric">
+<div class="metric-label">Biomarker Signals</div>
+<div class="metric-value">150+</div>
+<div class="metric-change">Imaging + fluid biomarkers</div>
+</div>
+
+<div class="metric">
+<div class="metric-label">System Status</div>
+<div class="metric-value">ONLINE</div>
+<div class="metric-change">Ready for analysis</div>
+</div>
+
+</div>
+
+</div>
+
+<div class="card">
+
+<h3>Your Workspace</h3>
+
+<div class="card-sub">
+Current access and platform utilization.
+</div>
+
+<div class="metric" style="margin-bottom:18px;">
+<div class="metric-label">Subscription</div>
+<div class="metric-value">Professional</div>
+<div class="metric-change">Active</div>
+</div>
+
+<div class="metric" style="margin-bottom:18px;">
+<div class="metric-label">Predictions Remaining</div>
+<div class="metric-value">184</div>
+<div class="metric-change">Resets in 18 days</div>
+</div>
+
+<div class="metric">
+<div class="metric-label">API Connection</div>
+<div class="metric-value">CONNECTED</div>
+<div class="metric-change">localhost:8000</div>
+</div>
+
+</div>
+
+</div>
+
+<div class="card" style="margin-top:28px;">
+
+<h3>What Genivra Evaluates</h3>
+
+<div class="card-sub">
+Key drivers of CNS clinical trial success.
+</div>
+
+<div class="tier-grid">
+
+<div class="tier">
+<div class="plan">Biomarker Validation</div>
+<div class="desc">
+Evaluate plasma, CSF, PET, and MRI biomarkers for predictive relevance and patient enrichment.
+</div>
+</div>
+
+<div class="tier">
+<div class="plan">Trial Design Risk</div>
+<div class="desc">
+Assess sample size, endpoint selection, duration, randomization strategy, and operational complexity.
+</div>
+</div>
+
+<div class="tier">
+<div class="plan">Enrollment Quality</div>
+<div class="desc">
+Analyze patient population characteristics, disease stage, cognitive baseline, and cohort fit.
+</div>
+</div>
+
+</div>
+
+</div>
+
+<div class="card" style="margin-top:28px;">
+
+<h3>Platform Capabilities</h3>
+
+<div class="card-sub">
+Designed for biotech investors, BD teams, and CNS research organizations.
+</div>
+
+<div class="tier-grid">
+
+<div class="tier">
+<div class="plan">Single Trial Analysis</div>
+<div class="desc">
+Generate probability of success and identify major trial risks.
+</div>
+</div>
+
+<div class="tier">
+<div class="plan">Portfolio Screening</div>
+<div class="desc">
+Evaluate multiple clinical programs simultaneously using batch upload workflows.
+</div>
+</div>
+
+<div class="tier">
+<div class="plan">Decision Support</div>
+<div class="desc">
+Highlight critical biomarkers, endpoint weaknesses, and protocol optimization opportunities.
+</div>
+</div>
+
+</div>
+
+</div>
+
+</div>
+
+<!-- PATIENT POPULATION SECTION -->
+<div class="card" style="margin-top:28px;">
+<h3>Patient Population</h3>
+<div class="card-sub">Baseline demographics and clinical characteristics</div>
+
+<div class="form-section">
+
+<div class="form-group">
+<label class="form-label">Enrollment Age Mean (years) *</label>
+<input type="number" 
+  name="age_mean" 
+  class="form-input" 
+  placeholder="e.g., 65" 
+  min="18" 
+  max="120" 
+  step="0.1" 
+  required
+  title="Average age of enrolled participants" />
+<div style="font-size:12px;color:var(--muted);margin-top:4px;">Mean age at enrollment (years)</div>
+</div>
+
+<div class="form-group">
+<label class="form-label">Baseline MMSE Score</label>
+<input type="number" 
+  name="baseline_mmse" 
+  class="form-input" 
+  placeholder="e.g., 22" 
+  min="0" 
+  max="30" 
+  step="0.1" 
+  title="Mini-Mental State Exam score at baseline" />
+<div style="font-size:12px;color:var(--muted);margin-top:4px;">Cognitive assessment (0-30, higher is better)</div>
+</div>
+
+<div class="form-group">
+<label class="form-label">Baseline MoCA Score</label>
+<input type="number" 
+  name="baseline_moca" 
+  class="form-input" 
+  placeholder="e.g., 24" 
+  min="0" 
+  max="30" 
+  step="0.1" 
+  title="Montreal Cognitive Assessment score at baseline" />
+<div style="font-size:12px;color:var(--muted);margin-top:4px;">Cognitive assessment (0-30, higher is better)</div>
+</div>
+
+<div class="form-group">
+<label class="form-label">CDR Baseline Score</label>
+<input type="number" 
+  name="cdr_baseline" 
+  class="form-input" 
+  placeholder="e.g., 1" 
+  min="0" 
+  max="3" 
+  step="0.1" 
+  title="Clinical Dementia Rating at baseline" />
+<div style="font-size:12px;color:var(--muted);margin-top:4px;">Dementia severity (0=normal, 0.5=questionable, 1-3=mild to severe)</div>
+</div>
+
+</div>
+
+</div>
+
+<!-- BIOMARKERS SECTION -->
+<div class="card" style="margin-top:28px;">
+<h3>Biomarkers</h3>
+<div class="card-sub">Optional: Include biomarker enrichment and baseline levels for enhanced predictions</div>
+
+<div class="form-section">
+
+<div class="form-group full">
+<label class="form-label">Biomarker Enrichment Strategy</label>
+<select name="biomarker_enrichment_strategy" class="form-select" title="Biomarker-based participant selection approach">
+<option value="">None / Not specified</option>
+<option value="amyloid">Amyloid-focused (A+)</option>
+<option value="tau">Tau-focused (T+)</option>
+<option value="neurodegeneration">Neurodegeneration-focused (N+)</option>
+<option value="multi">Multi-biomarker (AT(N) profile)</option>
+</select>
+<div style="font-size:12px;color:var(--muted);margin-top:4px;">Biomarker selection criteria for enrollment</div>
+</div>
+
+<div style="border-top:1px solid rgba(47,217,255,.15);margin:20px 0;padding-top:20px;">
+<div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:12px;">Baseline Biomarker Levels (Optional)</div>
+
+<div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;">
+
+<div class="form-group">
+<label class="form-label">Amyloid-β Level (pg/mL)</label>
+<input type="number" 
+  name="amyloid_beta_baseline" 
+  class="form-input" 
+  placeholder="e.g., 45" 
+  min="0" 
+  max="1000" 
+  step="0.1"
+  title="Cerebrospinal fluid or plasma amyloid-beta" />
+</div>
+
+<div class="form-group">
+<label class="form-label">Phosphorylated Tau (pg/mL)</label>
+<input type="number" 
+  name="phospho_tau_baseline" 
+  class="form-input" 
+  placeholder="e.g., 60" 
+  min="0" 
+  max="500" 
+  step="0.1"
+  title="CSF or plasma phosphorylated tau" />
+</div>
+
+<div class="form-group">
+<label class="form-label">Total Tau (pg/mL)</label>
+<input type="number" 
+  name="total_tau_baseline" 
+  class="form-input" 
+  placeholder="e.g., 380" 
+  min="0" 
+  max="1000" 
+  step="0.1"
+  title="Total tau in cerebrospinal fluid or plasma" />
+</div>
+
+<div class="form-group">
+<label class="form-label">Amyloid-β 42 Ratio</label>
+<input type="number" 
+  name="amyloid_ratio_baseline" 
+  class="form-input" 
+  placeholder="e.g., 0.065" 
+  min="0" 
+  max="1" 
+  step="0.001"
+  title="Amyloid-beta 42 / total amyloid-beta ratio" />
+</div>
+
+<div class="form-group">
+<label class="form-label">ApoE4 Status</label>
+<select name="apoe4_status" class="form-select" title="Apolipoprotein E4 genotype">
+<option value="">Unknown</option>
+<option value="negative">Negative (no ε4 allele)</option>
+<option value="heterozygous">Heterozygous (one ε4 allele)</option>
+<option value="homozygous">Homozygous (two ε4 alleles)</option>
+</select>
+</div>
+
+<div class="form-group">
+<label class="form-label">Plasma PTAU181 (pg/mL)</label>
+<input type="number" 
+  name="ptau181_plasma" 
+  class="form-input" 
+  placeholder="e.g., 12" 
+  min="0" 
+  max="200" 
+  step="0.1"
+  title="Phosphorylated tau 181 in plasma (newer biomarker)" />
+</div>
+
+</div>
+
+</div>
+
+</div>
+
+<!-- ENROLLMENT METRICS SECTION -->
+<div class="card" style="margin-top:28px;">
+<h3>Enrollment Metrics</h3>
+<div class="card-sub">Additional trial characteristics affecting prediction</div>
+
+<div class="form-section">
+
+<div class="form-group">
+<label class="form-label">Expected Dropout Rate (%)</label>
+<input type="number" 
+  name="dropout_rate" 
+  class="form-input" 
+  placeholder="e.g., 15" 
+  min="0" 
+  max="100" 
+  step="0.1" 
+  title="Anticipated percentage of participants who will discontinue" />
+<div style="font-size:12px;color:var(--muted);margin-top:4px;">Percentage of participants expected to discontinue early</div>
+</div>
+
+<div class="form-group">
+<label class="form-label">Enrollment Timeline (months)</label>
+<input type="number" 
+  name="enrollment_duration_months" 
+  class="form-input" 
+  placeholder="e.g., 12" 
+  min="1" 
+  max="60" 
+  step="0.5" 
+  title="How long enrollment will take" />
+<div style="font-size:12px;color:var(--muted);margin-top:4px;">Months for completing participant enrollment</div>
+</div>
+
+<div class="form-group">
+<label class="form-label">Geographic Diversity</label>
+<select name="geographic_diversity" class="form-select" title="Geographic scope of trial">
+<option value="">Select...</option>
+<option value="single_site">Single site</option>
+<option value="multi_national">Multi-national</option>
+<option value="global">Global</option>
+</select>
+<div style="font-size:12px;color:var(--muted);margin-top:4px;">Geographic scope of trial recruitment</div>
+</div>
+
+<div class="form-group full">
+<label class="form-label">Trial Infrastructure Rating</label>
+<select name="trial_infrastructure" class="form-select" title="Quality and readiness of trial infrastructure">
+<option value="">Select...</option>
+<option value="experienced">Experienced (established trial centers with proven success)</option>
+<option value="moderate">Moderate (some trial experience and resources)</option>
+<option value="developing">Developing (newer sites or less trial experience)</option>
+</select>
+<div style="font-size:12px;color:var(--muted);margin-top:4px;">Quality and readiness of participating sites and infrastructure</div>
+</div>
+
+</div>
+
+</div>
+
+<!-- FORM ACTIONS -->
+<div style="display:flex;gap:12px;margin-top:28px;padding:0 28px;">
+<button type="submit" class="btn primary">Generate Prediction</button>
+<button type="reset" class="btn secondary" onclick="resetPredictionForm()">Clear Form</button>
+</div>
+
+</form>
+
+<!-- VALIDATION ERROR PANEL -->
+<div id="validation-errors" style="display:none;margin-top:28px;">
+<div class="card" style="border-left:4px solid #ff6b6b;">
+<h3 style="color:#ff6b6b;">Form Validation Errors</h3>
+<ul id="errors-list" style="margin:12px 0;padding-left:20px;color:var(--muted);">
+</ul>
+</div>
+</div>
+
+<!-- RESULTS PANEL -->
+<div id="prediction-results" style="display:none;margin-top:28px;">
+<div class="card">
+<h3>Prediction Results</h3>
+<div id="results-content" style="padding:16px;"></div>
+</div>
+</div>
+
+</div>
+
+<!-- BATCH UPLOAD SECTION -->
+<div id="batch-section" class="section">
+<div class="topbar">
+<div class="title">
+<h2>Batch Upload</h2>
+<p>Upload CSV files for bulk trial predictions</p>
+</div>
+<div class="user-panel">
+<div class="status">● CONNECTED</div>
+<div class="avatar"></div>
+</div>
+</div>
+
+<div class="card">
+<h3>Upload CSV File</h3>
+<div class="upload-zone" id="upload-zone">
+<div class="upload-icon">📁</div>
+<div class="upload-text">Drag CSV files here or click to browse</div>
+<div class="upload-hint">Supported: CSV files with trial design parameters</div>
+<input type="file" id="file-input" accept=".csv" style="display:none;" />
+</div>
+
+<div id="upload-status" style="margin-top:24px;display:none;">
+<h4>Upload Progress</h4>
+<div style="background:rgba(255,255,255,.03);border-radius:16px;padding:16px;">
+<div id="status-message" style="color:var(--muted);font-size:14px;margin-bottom:12px;">Preparing upload...</div>
+<div style="width:100%;height:6px;background:rgba(255,255,255,.1);border-radius:3px;overflow:hidden;">
+<div id="progress-bar" style="width:0%;height:100%;background:linear-gradient(90deg,var(--cyan),var(--blue));transition:width .3s ease;"></div>
+</div>
+</div>
+</div>
+
+<div id="batch-results" style="margin-top:28px;display:none;">
+<h4>Results Summary</h4>
+<div id="batch-results-content" style="display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-top:16px;"></div>
+</div>
+
+<div style="display:flex;gap:12px;margin-top:24px;">
+<button class="btn primary" onclick="triggerFileUpload()">Select CSV File</button>
+<button class="btn secondary" onclick="downloadTemplate()">Download Template</button>
+</div>
+</div>
+
+</div>
+
+<!-- ANALYTICS SECTION -->
+<div id="analytics-section" class="section">
+<div class="topbar">
+<div class="title">
+<h2>Analytics</h2>
+<p>Trial prediction history and performance metrics</p>
+</div>
+<div class="user-panel">
+<div class="status">● CONNECTED</div>
+<div class="avatar"></div>
+</div>
+</div>
+
+<div class="chart-grid">
+<div class="chart-card">
+<h4>Predictions Over Time</h4>
+<div class="chart-placeholder">📊 Chart visualization (coming soon)</div>
+</div>
+<div class="chart-card">
+<h4>Success Rate Distribution</h4>
+<div class="chart-placeholder">📈 Chart visualization (coming soon)</div>
+</div>
+<div class="chart-card">
+<h4>Risk Tier Breakdown</h4>
+<div class="chart-placeholder">📉 Chart visualization (coming soon)</div>
+</div>
+<div class="chart-card">
+<h4>Top Biomarkers</h4>
+<div class="chart-placeholder">🧬 Chart visualization (coming soon)</div>
+</div>
+</div>
+
+<div class="card" style="margin-top:28px;">
+<h3>Recent Predictions</h3>
+<div style="color:var(--muted);font-size:14px;padding:24px;text-align:center;">
+<p>No predictions yet. Start by creating a single prediction or uploading a batch.</p>
+</div>
+</div>
+
+</div>
+
+<!-- API SETTINGS SECTION -->
+<div id="settings-section" class="section">
+<div class="topbar">
+<div class="title">
+<h2>API Settings</h2>
+<p>Manage API access, keys, and webhooks</p>
+</div>
+<div class="user-panel">
+<div class="status">● CONNECTED</div>
+<div class="avatar"></div>
+</div>
+</div>
+
+<div class="card">
+<h3>API Configuration</h3>
+<div class="form-section">
+<div class="form-group full">
+<label class="form-label">API Key</label>
+<input type="password" class="form-input" placeholder="sk_live_genivra_xxxxxxxxxxxx" />
+<div style="color:var(--muted);font-size:12px;margin-top:8px;">Keep your API key secret. Never share it publicly.</div>
+</div>
+<div class="form-group full">
+<label class="form-label">Webhook URL (Optional)</label>
+<input type="url" class="form-input" placeholder="https://your-domain.com/webhook" />
+<div style="color:var(--muted);font-size:12px;margin-top:8px;">Receive prediction results via webhook callbacks</div>
+</div>
+<div class="form-group">
+<label class="form-label">API Version</label>
+<select class="form-select">
+<option value="v1">v1.0</option>
+<option value="v2">v2.0 (Beta)</option>
+</select>
+</div>
+<div class="form-group">
+<label class="form-label">Rate Limit (req/min)</label>
+<input type="number" class="form-input" placeholder="1000" min="10" max="10000" />
+</div>
+</div>
+<div style="display:flex;gap:12px;margin-top:24px;">
+<button class="btn primary">Save Settings</button>
+<button class="btn secondary" onclick="testAPIConnection()">Test Connection</button>
+</div>
+</div>
+
+<div class="card" style="margin-top:28px;">
+<h3>Integration Guide</h3>
+<div style="padding:16px;background:rgba(47,217,255,.05);border-radius:16px;border:1px solid rgba(47,217,255,.2);">
+<p style="font-size:13px;color:var(--text);line-height:1.8;">
+<strong>Endpoint:</strong> POST https://genivra.ai/api/v1/predict<br/>
+<strong>Auth:</strong> Include API key in x-api-key header<br/>
+<strong>Response:</strong> JSON with trial_success_probability, risk_tier, and drivers<br/><br/>
+<a href="#" style="color:var(--cyan);text-decoration:none;font-weight:600;">View Full API Documentation →</a>
+</p>
+</div>
+</div>
+
+</div>
+
+</main>
+
+</div>
+
+<script>
+
+const API_BASE_URL = "http://127.0.0.1:8000";
+const REQUEST_TIMEOUT = 30000;
+
+async function fetchWithTimeout(
+    url,
+    options = {},
+    timeout = REQUEST_TIMEOUT
+) {
+    const controller = new AbortController();
+
+    const timeoutId = setTimeout(() => {
+        controller.abort();
+    }, timeout);
+
+    try {
+        const response = await fetch(url, {
+            ...options,
+            signal: controller.signal
+        });
+
+        clearTimeout(timeoutId);
+
+        return response;
+
+    } catch (error) {
+
+        clearTimeout(timeoutId);
+        throw error;
+    }
+}
+// Navigation System
+const navItems = document.querySelectorAll('.nav-item');
+const sections = document.querySelectorAll('.section');
+
+navItems.forEach(item => {
+  item.addEventListener('click', function() {
+    const sectionId = this.getAttribute('data-section');
+    if (sectionId) {
+      showSection(sectionId);
+    }
+  });
+});
+
+function showSection(sectionId) {
+  // Hide all sections
+  sections.forEach(section => {
+    section.classList.remove('active');
+  });
+  
+  // Remove active class from all nav items
+  navItems.forEach(item => {
+    item.classList.remove('active');
+  });
+  
+  // Show selected section
+  const targetSection = document.getElementById(sectionId + '-section');
+  if (targetSection) {
+    targetSection.classList.add('active');
+  }
+  
+  // Mark nav item as active
+  const navItem = document.querySelector(`.nav-item[data-section="${sectionId}"]`);
+  if (navItem) {
+    navItem.classList.add('active');
+  }
+}
+
+// Placeholder functions for buttons
+function handlePrediction() {
+  alert('✓ Prediction feature ready\nConnecting to backend API at localhost:8000');
+}
+
+async function sendPredictionRequest(payload) {
+
+    try {
+
+        const response =
+            await fetchWithTimeout(
+                `${API_BASE_URL}/predict`,
+                {
+                    method: "POST",
+                    headers: {
+                        "Content-Type":
+                            "application/json"
+                    },
+                    body: JSON.stringify(
+                        payload
+                    )
+                }
+            );
+
+        const data =
+            await response.json();
+
+        if (!response.ok) {
+
+            throw new Error(
+                data.detail ||
+                data.message ||
+                `HTTP ${response.status}`
+            );
+        }
+
+        return {
+            success: true,
+            data
+        };
+
+    } catch (error) {
+
+        if (
+            error.name ===
+            "AbortError"
+        ) {
+            return {
+                success: false,
+                error:
+                    "Request timed out"
+            };
+        }
+
+        return {
+            success: false,
+            error:
+                error.message
+        };
+    }
+}
+
+async function handlePredictionSubmit(event) {
+
+    event.preventDefault();
+
+    document.getElementById(
+        "validation-errors"
+    ).style.display = "none";
+
+    document.getElementById(
+        "prediction-results"
+    ).style.display = "none";
+
+    const form = document.getElementById(
+        "prediction-form"
+    );
+
+    const formData = new FormData(form);
+
+    const errors =
+        validatePredictionForm(formData);
+
+    if (errors.length > 0) {
+
+        const errorsList =
+            document.getElementById("errors-list");
+
+        errorsList.innerHTML =
+            errors.map(e => `<li>${e}</li>`).join("");
+
+        document.getElementById(
+            "validation-errors"
+        ).style.display = "block";
+
+        return;
+    }
+
+    const payload =
+        buildPredictionRequest(formData);
+
+    const resultsPanel =
+        document.getElementById(
+            "prediction-results"
+        );
+
+    const resultsContent =
+        document.getElementById(
+            "results-content"
+        );
+
+    resultsPanel.style.display = "block";
+
+    resultsContent.innerHTML = `
+        <div style="
+            padding:16px;
+            color:var(--cyan);
+            text-align:center;
+        ">
+            Running prediction...
+        </div>
+    `;
+
+    const result =
+        await sendPredictionRequest(payload);
+
+    if (!result.success) {
+
+        resultsContent.innerHTML = `
+            <div style="
+                padding:16px;
+                border-radius:12px;
+                background:rgba(255,107,107,.1);
+                border:1px solid rgba(255,107,107,.3);
+                color:#ff6b6b;
+            ">
+                <strong>Prediction Failed</strong>
+                <br><br>
+                ${result.error}
+            </div>
+        `;
+
+        return;
+    }
+
+    displayPredictionResults(
+        result.data
+    );
+}
+
+function validatePredictionForm(formData) {
+  const errors = [];
+  
+  // Check required fields
+  const sampleSize = formData.get('trial_sample_size');
+  if (!sampleSize || sampleSize < 10) {
+    errors.push('Trial Sample Size is required and must be at least 10');
+  }
+  
+  const duration = formData.get('trial_duration_weeks');
+  if (!duration || duration < 1) {
+    errors.push('Trial Duration is required and must be at least 1 week');
+  }
+  
+  const endpointType = formData.get('endpoint_type');
+  if (!endpointType) {
+    errors.push('Endpoint Type is required');
+  }
+  
+  const endpointName = formData.get('primary_endpoint_name');
+  if (!endpointName || endpointName.trim() === '') {
+    errors.push('Primary Endpoint Name is required');
+  }
+  
+  const ageMean = formData.get('age_mean');
+  if (!ageMean || ageMean < 18) {
+    errors.push('Enrollment Age Mean is required and must be at least 18');
+  }
+  
+  return errors;
+}
+
+function buildPredictionRequest(formData) {
+  // Convert form data to structured request object matching backend contract
+  const request = {
+    trial_design: {
+      trial_sample_size: parseInt(formData.get('trial_sample_size') || '0'),
+      trial_duration_weeks: parseInt(formData.get('trial_duration_weeks') || '0'),
+      number_of_arms: parseInt(formData.get('number_of_arms') || '0') || undefined,
+      randomization_ratio: formData.get('randomization_ratio') || undefined,
+      phase: formData.get('phase') || undefined,
+      indication: formData.get('indication') || undefined,
+    },
+    endpoints: {
+      endpoint_type: formData.get('endpoint_type'),
+      primary_endpoint_name: formData.get('primary_endpoint_name'),
+    },
+    enrollment: {
+      age_mean: parseFloat(formData.get('age_mean') || '0'),
+      baseline_mmse: formData.get('baseline_mmse') ? parseFloat(formData.get('baseline_mmse')) : undefined,
+      baseline_moca: formData.get('baseline_moca') ? parseFloat(formData.get('baseline_moca')) : undefined,
+      cdr_baseline: formData.get('cdr_baseline') ? parseFloat(formData.get('cdr_baseline')) : undefined,
+    },
+    biomarkers: {
+      biomarker_enrichment_strategy: formData.get('biomarker_enrichment_strategy') || undefined,
+      amyloid_beta_baseline: formData.get('amyloid_beta_baseline') ? parseFloat(formData.get('amyloid_beta_baseline')) : undefined,
+      phospho_tau_baseline: formData.get('phospho_tau_baseline') ? parseFloat(formData.get('phospho_tau_baseline')) : undefined,
+      total_tau_baseline: formData.get('total_tau_baseline') ? parseFloat(formData.get('total_tau_baseline')) : undefined,
+      amyloid_ratio_baseline: formData.get('amyloid_ratio_baseline') ? parseFloat(formData.get('amyloid_ratio_baseline')) : undefined,
+      apoe4_status: formData.get('apoe4_status') || undefined,
+      ptau181_plasma: formData.get('ptau181_plasma') ? parseFloat(formData.get('ptau181_plasma')) : undefined,
+    },
+    enrollment_metrics: {
+      dropout_rate: formData.get('dropout_rate') ? parseFloat(formData.get('dropout_rate')) : undefined,
+      enrollment_duration_months: formData.get('enrollment_duration_months') ? parseFloat(formData.get('enrollment_duration_months')) : undefined,
+      geographic_diversity: formData.get('geographic_diversity') || undefined,
+      trial_infrastructure: formData.get('trial_infrastructure') || undefined,
+    },
+  };
+  
+  // Remove undefined values
+  Object.keys(request).forEach(key => {
+    if (typeof request[key] === 'object') {
+      Object.keys(request[key]).forEach(subkey => {
+        if (request[key][subkey] === undefined) {
+          delete request[key][subkey];
+        }
+      });
+    }
+  });
+  
+  return request;
+}
+
+function displayPredictionResults(data) {
+
+    const resultsContent =
+        document.getElementById(
+            "results-content"
+        );
+
+    const probability =
+        data.trial_success_probability ??
+        data.probability ??
+        0;
+
+    const riskTier =
+        data.risk_tier ??
+        "UNKNOWN";
+
+    const confidence =
+        data.confidence ??
+        "N/A";
+
+    resultsContent.innerHTML = `
+
+        <div style="
+            display:grid;
+            grid-template-columns:
+                repeat(3,1fr);
+            gap:16px;
+        ">
+
+            <div class="metric">
+                <div class="metric-label">
+                    Success Probability
+                </div>
+                <div class="metric-value">
+                    ${(
+                        probability * 100
+                    ).toFixed(1)}%
+                </div>
+            </div>
+
+            <div class="metric">
+                <div class="metric-label">
+                    Risk Tier
+                </div>
+                <div class="metric-value">
+                    ${riskTier}
+                </div>
+            </div>
+
+            <div class="metric">
+                <div class="metric-label">
+                    Model Confidence
+                </div>
+                <div class="metric-value">
+                    ${confidence}
+                </div>
+            </div>
+
+        </div>
+    `;
+}
+
+function resetPredictionForm() {
+  document.getElementById('prediction-form').reset();
+  document.getElementById('validation-errors').style.display = 'none';
+  document.getElementById('prediction-results').style.display = 'none';
+}
+
+function triggerFileUpload() {
+  document.getElementById('file-input').click();
+}
+
+function downloadTemplate() {
+  alert('✓ CSV template download ready\nTemplate structure documentation');
+}
+
+async function testAPIConnection() {
+
+    console.log("Testing API connection...");
+
+    const result = await testApiConnection();
+
+    if (result.success) {
+
+        alert(
+            "✓ Connected to API\n\n" +
+            JSON.stringify(result.data, null, 2)
+        );
+
+    } else {
+
+        alert(
+            "✗ Connection Failed\n\n" +
+            result.error
+        );
+    }
+}
+
+async function testApiConnection() {
+
+    try {
+
+        const response =
+            await fetchWithTimeout(
+                `${API_BASE_URL}/health`,
+                {
+                    method: "GET"
+                }
+            );
+
+        if (!response.ok) {
+            throw new Error(
+                `HTTP ${response.status}`
+            );
+        }
+
+        const data =
+            await response.json();
+
+        return {
+            success: true,
+            data
+        };
+
+    } catch (error) {
+
+        return {
+            success: false,
+            error: error.message
+        };
+    }
+}
+
+// File upload handler
+document.getElementById('file-input')?.addEventListener('change', function(e) {
+  if (this.files.length > 0) {
+    document.getElementById('upload-status').style.display = 'block';
+    document.getElementById('status-message').textContent = 'File selected: ' + this.files[0].name;
+  }
+});
+
+// Drag and drop support
+const uploadZone = document.getElementById('upload-zone');
+if (uploadZone) {
+  uploadZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadZone.style.borderColor = 'rgba(47,217,255,.8)';
+  });
+  
+  uploadZone.addEventListener('dragleave', () => {
+    uploadZone.style.borderColor = 'rgba(47,217,255,.3)';
+  });
+  
+  uploadZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadZone.style.borderColor = 'rgba(47,217,255,.3)';
+  });
+}
+</script>
+
+</body>
+</html>

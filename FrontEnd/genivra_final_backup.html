@@ -1,0 +1,1525 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+
+<title>GENIVRA | CNS Risk Intelligence Platform</title>
+
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+<style>
+
+*{
+margin:0;
+padding:0;
+box-sizing:border-box;
+font-family:'Inter',sans-serif;
+}
+
+:root{
+
+--bg:#07111f;
+--bg2:#0d1628;
+--card:#111d34;
+--card2:#152544;
+
+--cyan:#2fd9ff;
+--blue:#4c7dff;
+--purple:#7a5cff;
+
+--text:#f6f9ff;
+--muted:#93a4c3;
+
+--border:rgba(255,255,255,.08);
+
+--glow:0 0 30px rgba(47,217,255,.18);
+
+}
+
+body{
+
+background:
+radial-gradient(circle at top left,#14376d 0%,transparent 35%),
+radial-gradient(circle at top right,#1b2057 0%,transparent 35%),
+linear-gradient(135deg,#050b16,#0b1324,#09111e);
+
+color:var(--text);
+
+min-height:100vh;
+
+overflow-x:hidden;
+
+}
+
+body::before{
+
+content:"";
+
+position:fixed;
+
+inset:0;
+
+pointer-events:none;
+
+background:
+
+linear-gradient(
+90deg,
+transparent 0%,
+rgba(47,217,255,.02) 50%,
+transparent 100%
+);
+
+}
+
+.container{
+
+display:flex;
+
+min-height:100vh;
+
+}
+
+/* SIDEBAR */
+
+.sidebar{
+
+width:290px;
+
+background:rgba(8,15,28,.88);
+
+backdrop-filter:blur(24px);
+
+border-right:1px solid var(--border);
+
+padding:34px 24px;
+
+display:flex;
+
+flex-direction:column;
+
+}
+
+.logo{
+
+display:flex;
+
+align-items:center;
+
+gap:14px;
+
+margin-bottom:42px;
+
+}
+
+.logo-badge{
+
+width:46px;
+height:46px;
+
+border-radius:14px;
+
+background:linear-gradient(135deg,var(--cyan),var(--blue));
+
+box-shadow:var(--glow);
+
+}
+
+.logo h1{
+
+font-size:22px;
+
+font-weight:800;
+
+letter-spacing:1px;
+
+}
+
+.logo span{
+
+display:block;
+
+font-size:11px;
+
+color:var(--muted);
+
+margin-top:3px;
+
+letter-spacing:1.2px;
+
+}
+
+.nav-section{
+
+margin-bottom:28px;
+
+}
+
+.nav-title{
+
+font-size:11px;
+
+letter-spacing:1.5px;
+
+color:var(--muted);
+
+margin-bottom:14px;
+
+text-transform:uppercase;
+
+}
+
+.nav-item{
+
+display:flex;
+
+align-items:center;
+
+gap:14px;
+
+padding:15px 16px;
+
+border-radius:18px;
+
+margin-bottom:10px;
+
+cursor:pointer;
+
+transition:.28s;
+
+border:1px solid transparent;
+
+}
+
+.nav-item:hover{
+
+background:rgba(47,217,255,.07);
+
+border-color:rgba(47,217,255,.18);
+
+transform:translateX(4px);
+
+}
+
+.nav-item.active{
+
+background:linear-gradient(
+90deg,
+rgba(47,217,255,.12),
+rgba(76,125,255,.10)
+);
+
+border-color:rgba(47,217,255,.25);
+
+box-shadow:var(--glow);
+
+}
+
+.nav-icon{
+
+font-size:17px;
+
+}
+
+.nav-label{
+
+font-size:14px;
+
+font-weight:600;
+
+}
+
+/* MAIN */
+
+.main{
+
+flex:1;
+
+padding:38px;
+
+}
+
+/* TOPBAR */
+
+.topbar{
+
+display:flex;
+
+justify-content:space-between;
+
+align-items:center;
+
+margin-bottom:34px;
+
+}
+
+.title h2{
+
+font-size:36px;
+
+font-weight:800;
+
+margin-bottom:8px;
+
+}
+
+.title p{
+
+color:var(--muted);
+
+}
+
+.user-panel{
+
+display:flex;
+
+align-items:center;
+
+gap:16px;
+
+}
+
+.status{
+
+padding:10px 16px;
+
+border-radius:999px;
+
+background:rgba(30,255,157,.12);
+
+border:1px solid rgba(30,255,157,.24);
+
+color:#5dffb2;
+
+font-size:13px;
+
+font-weight:700;
+
+}
+
+.avatar{
+
+width:46px;
+height:46px;
+
+border-radius:50%;
+
+background:linear-gradient(
+135deg,
+var(--purple),
+var(--cyan)
+);
+
+}
+
+/* GRID */
+
+.dashboard-grid{
+
+display:grid;
+
+grid-template-columns:1.4fr 1fr;
+
+gap:28px;
+
+}
+
+/* CARDS */
+
+.card{
+
+background:rgba(16,28,52,.82);
+
+border:1px solid var(--border);
+
+border-radius:28px;
+
+padding:28px;
+
+backdrop-filter:blur(24px);
+
+box-shadow:0 20px 60px rgba(0,0,0,.35);
+
+}
+
+.card h3{
+
+font-size:22px;
+
+margin-bottom:10px;
+
+}
+
+.card-sub{
+
+color:var(--muted);
+
+font-size:14px;
+
+margin-bottom:24px;
+
+}
+
+/* SUBSCRIPTION */
+
+.tier-grid{
+
+display:grid;
+
+grid-template-columns:repeat(3,1fr);
+
+gap:18px;
+
+}
+
+.tier{
+
+position:relative;
+
+background:linear-gradient(
+180deg,
+rgba(21,37,68,.9),
+rgba(10,18,34,.95)
+);
+
+border:1px solid rgba(255,255,255,.08);
+
+border-radius:24px;
+
+padding:24px;
+
+overflow:hidden;
+
+transition:.35s;
+
+}
+
+.tier:hover{
+
+transform:translateY(-8px);
+
+border-color:rgba(47,217,255,.25);
+
+box-shadow:var(--glow);
+
+}
+
+.tier::before{
+
+content:"";
+
+position:absolute;
+
+top:-120px;
+right:-80px;
+
+width:240px;
+height:240px;
+
+background:radial-gradient(
+circle,
+rgba(47,217,255,.18),
+transparent 70%
+);
+
+}
+
+.plan{
+
+font-size:20px;
+
+font-weight:800;
+
+margin-bottom:12px;
+
+}
+
+.price{
+
+font-size:40px;
+
+font-weight:800;
+
+margin-bottom:6px;
+
+}
+
+.price small{
+
+font-size:14px;
+
+color:var(--muted);
+
+}
+
+.desc{
+
+color:var(--muted);
+
+font-size:14px;
+
+margin-bottom:22px;
+
+line-height:1.7;
+
+}
+
+.feature{
+
+display:flex;
+
+gap:10px;
+
+margin-bottom:12px;
+
+font-size:14px;
+
+color:#d9e6ff;
+
+}
+
+.check{
+
+color:var(--cyan);
+
+font-weight:700;
+
+}
+
+.btn{
+
+margin-top:24px;
+
+width:100%;
+
+padding:14px;
+
+border:none;
+
+border-radius:16px;
+
+cursor:pointer;
+
+font-weight:700;
+
+font-size:14px;
+
+transition:.28s;
+
+}
+
+.primary{
+
+background:linear-gradient(
+135deg,
+var(--cyan),
+var(--blue)
+);
+
+color:white;
+
+box-shadow:var(--glow);
+
+}
+
+.primary:hover{
+
+transform:translateY(-3px);
+
+}
+
+.secondary{
+
+background:rgba(255,255,255,.05);
+
+color:var(--text);
+
+border:1px solid rgba(255,255,255,.08);
+
+}
+
+/* METRICS */
+
+.metrics{
+
+display:grid;
+
+grid-template-columns:repeat(2,1fr);
+
+gap:18px;
+
+margin-top:28px;
+
+}
+
+.metric{
+
+background:rgba(255,255,255,.03);
+
+border:1px solid var(--border);
+
+padding:22px;
+
+border-radius:20px;
+
+}
+
+.metric-label{
+
+color:var(--muted);
+
+font-size:13px;
+
+margin-bottom:12px;
+
+}
+
+.metric-value{
+
+font-size:34px;
+
+font-weight:800;
+
+}
+
+.metric-change{
+
+margin-top:10px;
+
+color:#58ffba;
+
+font-size:13px;
+
+}
+
+/* SECTIONS */
+
+.section{
+
+display:none;
+
+opacity:0;
+
+transition:opacity .3s ease;
+
+}
+
+.section.active{
+
+display:block;
+
+opacity:1;
+
+}
+
+.section-title{
+
+font-size:36px;
+
+font-weight:800;
+
+margin-bottom:8px;
+
+}
+
+.section-subtitle{
+
+color:var(--muted);
+
+margin-bottom:28px;
+
+}
+
+.form-section{
+
+display:grid;
+
+grid-template-columns:repeat(2,1fr);
+
+gap:24px;
+
+margin-bottom:28px;
+
+}
+
+.form-group{
+
+display:flex;
+
+flex-direction:column;
+
+gap:8px;
+
+}
+
+.form-group.full{
+
+grid-column:1/-1;
+
+}
+
+.form-label{
+
+font-size:13px;
+
+font-weight:600;
+
+color:var(--text);
+
+text-transform:uppercase;
+
+letter-spacing:.5px;
+
+}
+
+.form-input,
+.form-select,
+.form-textarea{
+
+padding:14px 16px;
+
+border-radius:16px;
+
+border:1px solid rgba(255,255,255,.08);
+
+background:rgba(255,255,255,.04);
+
+color:var(--text);
+
+font-size:14px;
+
+font-family:inherit;
+
+outline:none;
+
+transition:.28s;
+
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus{
+
+border-color:rgba(47,217,255,.3);
+
+background:rgba(255,255,255,.06);
+
+box-shadow:0 0 20px rgba(47,217,255,.1);
+
+}
+
+.form-input::placeholder{
+
+color:var(--muted);
+
+}
+
+.form-textarea{
+
+grid-column:1/-1;
+
+resize:vertical;
+
+min-height:100px;
+
+}
+
+.upload-zone{
+
+grid-column:1/-1;
+
+border:2px dashed rgba(47,217,255,.3);
+
+border-radius:20px;
+
+padding:40px;
+
+text-align:center;
+
+cursor:pointer;
+
+transition:.28s;
+
+background:rgba(47,217,255,.05);
+
+}
+
+.upload-zone:hover{
+
+border-color:rgba(47,217,255,.5);
+
+background:rgba(47,217,255,.08);
+
+}
+
+.upload-icon{
+
+font-size:48px;
+
+margin-bottom:16px;
+
+}
+
+.upload-text{
+
+color:var(--text);
+
+font-weight:600;
+
+margin-bottom:4px;
+
+}
+
+.upload-hint{
+
+color:var(--muted);
+
+font-size:13px;
+
+}
+
+.chart-grid{
+
+display:grid;
+
+grid-template-columns:repeat(2,1fr);
+
+gap:24px;
+
+}
+
+.chart-card{
+
+background:rgba(16,28,52,.82);
+
+border:1px solid var(--border);
+
+border-radius:28px;
+
+padding:28px;
+
+backdrop-filter:blur(24px);
+
+}
+
+.chart-card h4{
+
+font-size:18px;
+
+margin-bottom:20px;
+
+}
+
+.chart-placeholder{
+
+width:100%;
+
+height:240px;
+
+background:linear-gradient(135deg,rgba(47,217,255,.05),rgba(76,125,255,.05));
+
+border-radius:16px;
+
+display:flex;
+
+align-items:center;
+
+justify-content:center;
+
+color:var(--muted);
+
+font-size:14px;
+
+}
+
+/* RESPONSIVE */
+
+@media(max-width:1200px){
+
+.dashboard-grid{
+
+grid-template-columns:1fr;
+
+}
+
+.tier-grid{
+
+grid-template-columns:1fr;
+
+}
+
+.form-section{
+
+grid-template-columns:1fr;
+
+}
+
+.form-group.full{
+
+grid-column:1;
+
+}
+
+.chart-grid{
+
+grid-template-columns:1fr;
+
+}
+
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="container">
+
+<aside class="sidebar">
+
+<div class="logo">
+
+<div class="logo-badge"></div>
+
+<div>
+
+<h1>GENIVRA</h1>
+
+<span>CNS RISK INTELLIGENCE</span>
+
+</div>
+
+</div>
+
+<div class="nav-section">
+
+<div class="nav-title">Platform</div>
+
+<div class="nav-item active" data-section="dashboard">
+<div class="nav-icon">Ã¢â€”â€°</div>
+<div class="nav-label">Dashboard</div>
+</div>
+
+<div class="nav-item">
+<div class="nav-icon">Ã¢â€”Å½</div>
+<div class="nav-label">Single Prediction</div>
+</div>
+
+<div class="nav-item">
+<div class="nav-icon">Ã¢â€“Â£</div>
+<div class="nav-label">Batch Upload</div>
+</div>
+
+<div class="nav-item">
+<div class="nav-icon">Ã¢â€”Ë†</div>
+<div class="nav-label">Analytics</div>
+</div>
+
+<div class="nav-item">
+<div class="nav-icon">Ã¢Å¡â„¢</div>
+<div class="nav-label">API Settings</div>
+</div>
+
+</div>
+
+<div class="nav-section">
+
+<div class="nav-title">Account</div>
+
+<div class="nav-item">
+<div class="nav-icon">Ã¢Å“Â¦</div>
+<div class="nav-label">Subscription</div>
+</div>
+
+<div class="nav-item">
+<div class="nav-icon">Ã¢Â¬Â¢</div>
+<div class="nav-label">Billing</div>
+</div>
+
+</div>
+
+</aside>
+
+<main class="main">
+
+<div class="topbar">
+
+<div class="title">
+
+<h2>Genivra Enterprise Dashboard</h2>
+
+<p>
+AI-powered CNS clinical trial forecasting platform
+</p>
+
+</div>
+
+<div class="user-panel">
+
+<div class="status">
+Ã¢â€”Â CONNECTED
+</div>
+
+<div class="avatar"></div>
+
+</div>
+
+</div>
+<!-- PART 1B -->
+
+<div class="dashboard-grid">
+
+<div class="card">
+
+<h3>Subscription Access</h3>
+
+<div class="card-sub">
+Enterprise CNS intelligence plans for clinical development teams.
+</div>
+
+<div class="tier-grid">
+
+<!-- ANALYST -->
+
+<div class="tier">
+
+<div class="plan">
+Analyst
+</div>
+
+<div class="price">
+
+$1,000
+
+<small>/month</small>
+
+</div>
+
+<div class="desc">
+
+Designed for individual analysts, biotech researchers, and early-stage teams.
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>250 Predictions / Month</div>
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>Single User Access</div>
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>Dashboard Analytics</div>
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>CSV Batch Upload</div>
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>Standard Driver Analysis</div>
+
+</div>
+
+<button class="btn secondary">
+
+Current Plan
+
+</button>
+
+</div>
+
+<!-- PROFESSIONAL -->
+
+<div class="tier">
+
+<div class="plan">
+
+Professional
+
+</div>
+
+<div class="price">
+
+$2.5kÃ¢â‚¬â€œ5k
+
+<small>/month</small>
+
+</div>
+
+<div class="desc">
+
+Production-grade clinical forecasting with unlimited platform usage.
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>Unlimited Predictions</div>
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>Unlimited API Usage</div>
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>Priority Processing</div>
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>Advanced Biomarker Analytics</div>
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>Multi-User Workspace</div>
+
+</div>
+
+<button class="btn primary">
+
+Upgrade Plan
+
+</button>
+
+</div>
+
+<!-- ENTERPRISE -->
+
+<div class="tier">
+
+<div class="plan">
+
+Enterprise
+
+</div>
+
+<div class="price">
+
+$25k+
+
+<small>/year</small>
+
+</div>
+
+<div class="desc">
+
+Dedicated enterprise deployment for pharmaceutical development pipelines.
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>Priority Clinical Analysis</div>
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>Constant Integration Support</div>
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>Dedicated Success Team</div>
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>Custom API Deployment</div>
+
+</div>
+
+<div class="feature">
+
+<div class="check">Ã¢Å“â€œ</div>
+
+<div>Regulatory Documentation Support</div>
+
+</div>
+
+<button class="btn primary">
+
+Contact Sales
+
+</button>
+
+</div>
+
+</div>
+
+<div class="metrics">
+
+<div class="metric">
+
+<div class="metric-label">
+
+Prediction Utilization
+
+</div>
+
+<div class="metric-value">
+
+71%
+
+</div>
+
+<div class="metric-change">
+
+Ã¢â€ â€˜ 12% vs previous month
+
+</div>
+
+</div>
+
+<div class="metric">
+
+<div class="metric-label">
+
+API Throughput
+
+</div>
+
+<div class="metric-value">
+
+14,290
+
+</div>
+
+<div class="metric-change">
+
+Ã¢â€ â€˜ Healthy usage trend
+
+</div>
+
+</div>
+
+<div class="metric">
+
+<div class="metric-label">
+
+Model Version
+
+</div>
+
+<div class="metric-value">
+
+v2.4.1
+
+</div>
+
+<div class="metric-change">
+
+Updated May 2026
+
+</div>
+
+</div>
+
+<div class="metric">
+
+<div class="metric-label">
+
+System Health
+
+</div>
+
+<div class="metric-value">
+
+99.98%
+
+</div>
+
+<div class="metric-change">
+
+Operational
+
+</div>
+
+</div>
+
+</div>
+
+</div>
+
+<!-- RIGHT COLUMN -->
+
+<div style="display:flex;flex-direction:column;gap:28px;">
+
+<div class="card">
+
+<h3>
+
+Workspace Status
+
+</h3>
+
+<div class="card-sub">
+
+Enterprise clinical intelligence environment.
+
+</div>
+
+<div class="metric" style="margin-bottom:18px;">
+
+<div class="metric-label">
+
+Subscription Status
+
+</div>
+
+<div class="metric-value">
+
+ANALYST
+
+</div>
+
+<div class="metric-change">
+
+Billing Active
+
+</div>
+
+</div>
+
+<div class="metric" style="margin-bottom:18px;">
+
+<div class="metric-label">
+
+Prediction Credits Remaining
+
+</div>
+
+<div class="metric-value">
+
+184
+
+</div>
+
+<div class="metric-change">
+
+Resets in 18 days
+
+</div>
+
+</div>
+
+<div class="metric">
+
+<div class="metric-label">
+
+API Connection
+
+</div>
+
+<div class="metric-value">
+
+CONNECTED
+
+</div>
+
+<div class="metric-change">
+
+localhost:8000
+
+</div>
+
+</div>
+
+</div>
+
+<div class="card">
+
+<h3>
+
+API Settings
+
+</h3>
+
+<div class="card-sub">
+
+Configure secure API access and environment settings.
+
+</div>
+
+<label style="font-size:13px;color:var(--muted);display:block;margin-bottom:12px;">
+
+API KEY
+
+</label>
+
+<input
+type="password"
+placeholder="sk_live_genivra_xxxxxxxxxxxx"
+style="
+width:100%;
+padding:16px;
+border-radius:16px;
+border:1px solid rgba(255,255,255,.08);
+background:rgba(255,255,255,.04);
+color:white;
+outline:none;
+margin-bottom:18px;
+"
+/>
+
+<button class="btn primary">
+
+Save Configuration
+
+</button>
+
+
+
+</main>
+
+<script>
+// Navigation System
+const navItems = document.querySelectorAll('.nav-item');
+const sections = document.querySelectorAll('.section');
+
+navItems.forEach(item => {
+  item.addEventListener('click', function() {
+    const sectionId = this.getAttribute('data-section');
+    if (sectionId) {
+      showSection(sectionId);
+    }
+  });
+});
+
+// Add data-section attributes for nav items without them
+document.querySelectorAll('.nav-item').forEach((item, index) => {
+  if (!item.hasAttribute('data-section')) {
+    const label = item.querySelector('.nav-label').textContent.toLowerCase().replace(/\s+/g, '-');
+    item.setAttribute('data-section', label);
+  }
+});
+
+function showSection(sectionId) {
+  // Hide all sections
+  sections.forEach(section => {
+    section.classList.remove('active');
+  });
+  
+  // Remove active class from all nav items
+  navItems.forEach(item => {
+    item.classList.remove('active');
+  });
+  
+  // Show selected section
+  const targetSection = document.getElementById(sectionId + '-section');
+  if (targetSection) {
+    targetSection.classList.add('active');
+  }
+  
+  // Mark nav item as active
+  const navItem = document.querySelector(`.nav-item[data-section="${sectionId}"]`);
+  if (navItem) {
+    navItem.classList.add('active');
+  }
+}
+
+// Placeholder functions for buttons
+function handlePrediction() {
+  alert('Prediction feature - Ready for backend connection');
+}
+
+function resetPredictionForm() {
+  document.querySelectorAll('.form-input, .form-select').forEach(input => {
+    input.value = '';
+  });
+}
+
+function triggerFileUpload() {
+  document.getElementById('file-input').click();
+}
+
+function downloadTemplate() {
+  alert('CSV template download - Ready for implementation');
+}
+
+function testAPIConnection() {
+  alert('API connection test - Ready for backend verification');
+}
+
+// File upload handler
+document.getElementById('file-input')?.addEventListener('change', function(e) {
+  if (this.files.length > 0) {
+    document.getElementById('upload-status').style.display = 'block';
+    document.getElementById('status-message').textContent = 'File selected: ' + this.files[0].name;
+  }
+});
+
+// Drag and drop support
+const uploadZone = document.getElementById('upload-zone');
+if (uploadZone) {
+  uploadZone.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    uploadZone.style.borderColor = 'rgba(47,217,255,.8)';
+  });
+  
+  uploadZone.addEventListener('dragleave', () => {
+    uploadZone.style.borderColor = 'rgba(47,217,255,.3)';
+  });
+  
+  uploadZone.addEventListener('drop', (e) => {
+    e.preventDefault();
+    uploadZone.style.borderColor = 'rgba(47,217,255,.3)';
+  });
+}
+</script>
+
+</main>
+
+</div>
+
+</body>
+</html>
